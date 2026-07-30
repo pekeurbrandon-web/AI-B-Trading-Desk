@@ -25,6 +25,16 @@ app.get('/', (req, res) => {
   }
 });
 
+// Preview / marketing page
+app.get('/preview', (req, res) => {
+  const previewPath = path.join(__dirname, 'public', 'preview.html');
+  if (fs.existsSync(previewPath)) {
+    res.sendFile(previewPath);
+  } else {
+    res.status(404).send('preview.html not found');
+  }
+});
+
 // ---------------- API keys stay in their own small local file ----------------
 // Deliberately NOT migrated to Supabase along with settings/journal/patterns: these are
 // server secrets, not application data, and keeping them local avoids ever putting a raw
