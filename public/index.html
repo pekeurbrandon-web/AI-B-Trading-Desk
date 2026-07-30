@@ -1,1144 +1,127 @@
-(function(){
-
-  // ================= ICONS (single source, used by both sidebar and mobile nav) =================
-  var ICONS = {
-    dashboard: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.3"/><rect x="14" y="3" width="7" height="7" rx="1.3"/><rect x="3" y="14" width="7" height="7" rx="1.3"/><rect x="14" y="14" width="7" height="7" rx="1.3"/></svg>',
-    analyze: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="6" y1="4" x2="6" y2="20"/><rect x="4" y="9" width="4" height="6" rx="1"/><line x1="12" y1="2" x2="12" y2="22"/><rect x="10" y="6" width="4" height="9" rx="1"/><line x1="18" y1="6" x2="18" y2="18"/><rect x="16" y="10" width="4" height="5" rx="1"/></svg>',
-    scanner: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><path d="M12 3.5 A8.5 8.5 0 0 1 20.5 12"/></svg>',
-    patterns: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="12,3 21,8 12,13 3,8"/><polyline points="3,13 12,18 21,13"/><polyline points="3,17.3 12,22 21,17.3"/></svg>',
-    calculator: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4.5" y="2.5" width="15" height="19" rx="2"/><line x1="7.5" y1="6.5" x2="16.5" y2="6.5"/><circle cx="8" cy="11.5" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="11.5" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="11.5" r="0.9" fill="currentColor" stroke="none"/><circle cx="8" cy="15.5" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="15.5" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="15.5" r="0.9" fill="currentColor" stroke="none"/></svg>',
-    journal: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4.5 4.5A2.2 2.2 0 0 1 6.7 2.3H20v18.4H6.7A2.2 2.2 0 0 0 4.5 23z"/><line x1="4.5" y1="4.5" x2="4.5" y2="23"/></svg>',
-    coach: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4.5h16v11.5H9l-4.5 4V4.5z"/></svg>',
-    stats: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="5" y1="20" x2="5" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="19" y1="20" x2="19" y2="14"/></svg>'
-  };
-  var NAV_ITEMS = [
-    {id:'dashboard', label:'Dashboard'}, {id:'analyze', label:'Analyze Chart'}, {id:'scanner', label:'Scanner'},
-    {id:'patterns', label:'Pattern Library'}, {id:'calculator', label:'Risk Calculator'}, {id:'journal', label:'Journal'},
-    {id:'coach', label:'AI Coach'}, {id:'stats', label:'Performance'}
-  ];
-  document.getElementById('navDesktop').innerHTML = NAV_ITEMS.map(function(n,i){
-    return '<div class="nav-item'+(i===0?' active':'')+'" data-page="'+n.id+'">'+ICONS[n.id]+'<span>'+n.label+'</span></div>';
-  }).join('');
-  document.getElementById('navMobile').innerHTML = NAV_ITEMS.map(function(n,i){
-    return '<div class="mobile-nav-item'+(i===0?' active':'')+'" data-page="'+n.id+'">'+n.label.split(' ')[0]+'</div>';
-  }).join('');
-
-  function goToPage(name){
-    document.querySelectorAll('.nav-item').forEach(function(n){n.classList.toggle('active', n.dataset.page===name);});
-    document.querySelectorAll('.mobile-nav-item').forEach(function(n){n.classList.toggle('active', n.dataset.page===name);});
-    document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active');});
-    document.getElementById('page-'+name).classList.add('active');
-    if(name==='dashboard') renderDashboard();
-    if(name==='journal') renderJournal();
-    if(name==='stats') renderStats();
-    if(name==='patterns') renderPatterns();
-  }
-  document.querySelectorAll('.nav-item, .mobile-nav-item').forEach(function(item){
-    item.addEventListener('click', function(){ goToPage(item.dataset.page); });
-  });
-
-  function escapeHtml(s){
-    if(s === null || s === undefined) return '';
-    return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
-  }
-
-  // ================= BACKEND API HELPERS (replaces window.storage / direct Anthropic calls) =================
-  function getToken(){ return localStorage.getItem('aib-token') || ''; }
-  function setToken(t){ localStorage.setItem('aib-token', t); }
-  function clearToken(){ localStorage.removeItem('aib-token'); }
-
-  async function apiRequest(method, path, body){
-    var headers = { 'Content-Type': 'application/json' };
-    var token = getToken();
-    if(token) headers['Authorization'] = 'Bearer ' + token;
-    var res = await fetch(path, { method: method, headers: headers, body: body !== undefined ? JSON.stringify(body) : undefined });
-    if(res.status === 401){
-      showAuthGate('Access token was rejected by the server. Check it matches APP_ACCESS_TOKEN in your .env.');
-      throw new Error('Unauthorized');
-    }
-    if(!res.ok){
-      var errBody = null;
-      try{ errBody = await res.json(); }catch(e){}
-      throw new Error((errBody && errBody.error) || ('Request failed: ' + res.status));
-    }
-    return res.json();
-  }
-  function apiGet(path){ return apiRequest('GET', path); }
-  function apiPost(path, body){ return apiRequest('POST', path, body); }
-  function apiPut(path, body){ return apiRequest('PUT', path, body); }
-  function apiDelete(path){ return apiRequest('DELETE', path); }
-
-  // ================= ACCESS GATE =================
-  function showAuthGate(message){
-    document.getElementById('authGate').style.display = 'flex';
-    document.getElementById('authGateMsg').textContent = message || '';
-  }
-  function hideAuthGate(){ document.getElementById('authGate').style.display = 'none'; }
-  document.getElementById('authGateBtn').addEventListener('click', async function(){
-    var val = document.getElementById('authGateInput').value.trim();
-    if(!val){ document.getElementById('authGateMsg').textContent = 'Enter the access token configured on your server.'; return; }
-    setToken(val);
-    try{
-      await apiGet('/api/settings');
-      hideAuthGate();
-      boot();
-    }catch(e){
-      document.getElementById('authGateMsg').textContent = 'Token rejected — check APP_ACCESS_TOKEN on your server and try again.';
-    }
-  });
-  document.getElementById('authGateInput').addEventListener('keydown', function(e){
-    if(e.key === 'Enter') document.getElementById('authGateBtn').click();
-  });
-  document.getElementById('changeTokenBtn').addEventListener('click', function(){
-    clearToken();
-    showAuthGate('Enter your new access token.');
-  });
-
-  // ================= SINGLE SOURCE OF TRUTH STORE (backed by your own server, not artifact storage) =================
-  var Store = (function(){
-    var state = { settings:{balance:10000, riskPct:1, dailyLoss:4}, entries:[], patterns:[], lastAnalysis:null };
-    async function init(){
-      try{ state.settings = await apiGet('/api/settings'); }catch(e){}
-      try{ state.entries = await apiGet('/api/journal'); }catch(e){}
-      try{ state.patterns = await apiGet('/api/patterns'); }catch(e){}
-    }
-    async function setSettings(partial){
-      state.settings = Object.assign({}, state.settings, partial);
-      try{ await apiPut('/api/settings', state.settings); return true; }catch(e){ console.error(e); return false; }
-    }
-    async function addEntry(entry){
-      try{ var saved = await apiPost('/api/journal', entry); state.entries.unshift(saved); return true; }catch(e){ console.error(e); return false; }
-    }
-    async function updateEntry(id, patch){
-      try{ var saved = await apiPut('/api/journal/'+id, patch); state.entries = state.entries.map(function(e){ return e.id===id ? saved : e; }); return true; }catch(e){ console.error(e); return false; }
-    }
-    async function deleteEntry(id){
-      try{ await apiDelete('/api/journal/'+id); state.entries = state.entries.filter(function(e){ return e.id!==id; }); return true; }catch(e){ console.error(e); return false; }
-    }
-    async function addPattern(p){
-      try{ var saved = await apiPost('/api/patterns', p); state.patterns.unshift(saved); return true; }catch(e){ console.error(e); return false; }
-    }
-    async function deletePattern(id){
-      try{ await apiDelete('/api/patterns/'+id); state.patterns = state.patterns.filter(function(p){ return p.id!==id; }); return true; }catch(e){ console.error(e); return false; }
-    }
-    return { init:init, get:function(){return state;}, setSettings:setSettings, addEntry:addEntry, updateEntry:updateEntry, deleteEntry:deleteEntry, addPattern:addPattern, deletePattern:deletePattern };
-  })();
-
-  // ================= SETUP QUALITY (shared classifier — one function, used everywhere) =================
-  function classifyGrade(confidence, hasSetup){
-    if(!hasSetup) return null;
-    if(confidence >= 80) return 'A+';
-    if(confidence >= 60) return 'B';
-    return 'C';
-  }
-  function gradeTagHtml(grade){
-    if(!grade) return '';
-    var cls = grade === 'A+' ? 'grade-A' : (grade === 'B' ? 'grade-B' : 'grade-C');
-    return '<span class="tag '+cls+'">'+grade+' setup</span>';
-  }
-
-  // ================= UNIFIED DESK CONTEXT =================
-  // The single shared awareness layer. Coach, Franky Lamps, and Library Insights all call
-  // this instead of building their own partial summaries — one consistent picture of the
-  // whole desk (settings, journal performance, pattern library performance, last analysis)
-  // feeds every AI-backed feature. This is what makes it one system, not three bolted together.
-  function buildDeskContext(){
-    var st = Store.get();
-    var entries = st.entries;
-    var patterns = st.patterns;
-    var wins = entries.filter(function(e){return e.outcome==='win';}).length;
-    var losses = entries.filter(function(e){return e.outcome==='loss';}).length;
-    var decided = wins+losses;
-    var winRate = decided>0 ? ((wins/decided)*100).toFixed(0)+'%' : 'not enough closed trades yet';
-    var patWins = patterns.filter(function(p){return p.outcome==='win';}).length;
-    var patLosses = patterns.filter(function(p){return p.outcome==='loss';}).length;
-    var patDecided = patWins+patLosses;
-    var patWinRate = patDecided>0 ? ((patWins/patDecided)*100).toFixed(0)+'%' : 'not enough logged patterns yet';
-    var la = st.lastAnalysis;
-    var recentNotes = entries.filter(function(e){return e.notes;}).slice(0,4).map(function(e){return e.symbol+': '+e.notes.slice(0,50);}).join('; ');
-    return "DESK CONTEXT (shared across every AI feature on this desk — Coach, Franky, and Library Insights all see this same picture): " +
-      "Settings: balance $"+st.settings.balance+", risk "+st.settings.riskPct+"%/trade, daily loss limit "+st.settings.dailyLoss+"%. " +
-      "Journal: "+entries.length+" entries logged, win rate "+winRate+". " +
-      "Pattern Library: "+patterns.length+" historical setups logged, win rate "+patWinRate+". " +
-      (recentNotes ? ("Recent trade notes: "+recentNotes+". ") : "") +
-      (la ? ("Last chart analyzed: "+((la.detected&&la.detected.symbol_guess)||'?')+", "+la.trend_bias+" bias, confidence "+la.confidence_score+".") : "No chart analyzed yet this session.");
-  }
-
-  // ================= SYMBOL PRESETS =================
-  var PRESETS = {
-    "EURUSD": {pip:0.0001, pipValue:10}, "GBPUSD": {pip:0.0001, pipValue:10},
-    "AUDUSD": {pip:0.0001, pipValue:10}, "NZDUSD": {pip:0.0001, pipValue:10},
-    "USDCAD": {pip:0.0001, pipValue:7.4}, "USDCHF": {pip:0.0001, pipValue:11.3},
-    "USDJPY": {pip:0.01, pipValue:9.1}, "XAUUSD": {pip:0.01, pipValue:1},
-    "XAGUSD": {pip:0.001, pipValue:5}, "US30": {pip:1, pipValue:1},
-    "NAS100": {pip:1, pipValue:1}, "US500": {pip:1, pipValue:1},
-    "GER40": {pip:1, pipValue:1}, "UK100": {pip:1, pipValue:1},
-    "BTCUSD": {pip:1, pipValue:1}, "ETHUSD": {pip:1, pipValue:1}, "CUSTOM": {pip:'', pipValue:''}
-  };
-  function normalizeSymbol(raw){
-    if(!raw) return null;
-    var k = String(raw).toUpperCase().replace(/[^A-Z0-9]/g,'');
-    return PRESETS[k] ? k : null;
-  }
-
-  // ================= SHARED API CALL HELPER (one function, all AI calls go through your server, provider-selectable) =================
-  var lastCallMeta = null; // set after every callClaude — used to tag journal/pattern entries with which provider actually answered
-  async function callClaude(content, maxTokens){
-    var s = Store.get().settings;
-    var provider = ['openai','openrouter'].indexOf(s.aiProvider) !== -1 ? s.aiProvider : 'anthropic';
-    var data = await apiPost('/api/claude', { content: content, max_tokens: maxTokens || 1000, provider: provider, failover: s.failoverEnabled !== false });
-    lastCallMeta = { provider: data.provider || provider, model: data.model || null, failedOver: !!data.failedOver, attempted: data.attempted || [provider] };
-    var textBlock = (data.content || []).map(function(b){ return b.text || ''; }).join('\n');
-    return textBlock.replace(/```json|```/g, '').trim();
-  }
-  function providerTag(){
-    if(!lastCallMeta) return null;
-    var label = lastCallMeta.provider + (lastCallMeta.model ? (' ('+lastCallMeta.model+')') : '');
-    return lastCallMeta.failedOver ? (label + ' — failed over from ' + lastCallMeta.attempted[0]) : label;
-  }
-
-  // ================= ANALYZE — fixed 5-timeframe upload (5M entry, 15M, 1H, 4H, Daily) =================
-  var slots = [
-    { label:'Entry — 5M (required)', tf:'5M', required:true, b64:null, mediaType:null },
-    { label:'15M', tf:'15M', required:false, b64:null, mediaType:null },
-    { label:'1H', tf:'1H', required:false, b64:null, mediaType:null },
-    { label:'4H', tf:'4H', required:false, b64:null, mediaType:null },
-    { label:'Daily', tf:'Daily', required:false, b64:null, mediaType:null }
-  ];
-  function renderUploadSlots(){
-    var wrap = document.getElementById('analyzeUploadSlots');
-    wrap.innerHTML = slots.map(function(s, i){
-      return '<div><div class="upload-zone" id="slotZone'+i+'" style="min-height:100px;display:flex;flex-direction:column;justify-content:center;">' +
-        (s.b64 ? '<img src="data:'+s.mediaType+';base64,'+s.b64+'" class="preview-img">' : '<div><div style="font-size:16px;">&#8593;</div><p><strong style="color:var(--text-primary);">'+s.tf+'</strong><br>'+(s.required?'required':'optional')+'</p></div>') +
-        '</div><input type="file" id="slotFile'+i+'" accept="image/png,image/jpeg" style="display:none;">' +
-        (s.b64 ? '<button class="small ghost" style="margin-top:6px;width:100%;" onclick="window.__clearSlot('+i+')">Clear</button>' : '') + '</div>';
-    }).join('');
-    slots.forEach(function(s, i){
-      document.getElementById('slotZone'+i).addEventListener('click', function(){ document.getElementById('slotFile'+i).click(); });
-      document.getElementById('slotFile'+i).addEventListener('change', function(e){ if(e.target.files && e.target.files[0]) handleSlotFile(i, e.target.files[0]); });
-    });
-    document.getElementById('analyzeBtn').disabled = !slots[0].b64;
-  }
-  window.__clearSlot = function(i){ slots[i].b64 = null; slots[i].mediaType = null; renderUploadSlots(); };
-  function handleSlotFile(i, file){
-    if(!file.type.match(/image\/(png|jpeg|jpg)/)){ alert('Please upload a PNG or JPG.'); return; }
-    var reader = new FileReader();
-    reader.onload = function(){ slots[i].b64 = reader.result.split(',')[1]; slots[i].mediaType = file.type; renderUploadSlots(); };
-    reader.onerror = function(){ alert('Could not read that file.'); };
-    reader.readAsDataURL(file);
-  }
-  renderUploadSlots();
-
-  function findSimilarPatterns(symbolHint){
-    var key = (symbolHint||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
-    if(!key) return [];
-    return Store.get().patterns.filter(function(p){ return p.symbol.toUpperCase().replace(/[^A-Z0-9]/g,'') === key; }).slice(0,3);
-  }
-
-  function buildAnalysisPrompt(symbolHint, tfHint, contextHint, usedSlots){
-    var tfList = usedSlots.map(function(s){ return s.tf + ' chart'; }).join(', ');
-    var similar = findSimilarPatterns(symbolHint);
-    var patternContext = similar.length ? ("Trader's logged historical setups for this symbol (qualitative reference only, not statistical backtesting — small sample, do not treat as a proven edge): " +
-      similar.map(function(p){ return p.setupType+' -> '+p.outcome; }).join('; ') + ".\n") : "";
-    return "You are a professional Smart Money Concepts / ICT technical analyst reviewing trading chart screenshot(s) across multiple timeframes, with full awareness of this trader's desk. " +
-      buildDeskContext() + "\n" +
-      "Images provided, in order: " + tfList + ". The Daily/4H charts (if provided) set higher-timeframe bias; 1H/15M refine it; the 5M chart is for entry timing only and never overrides higher-timeframe structure. " +
-      "Symbol hint (unverified): " + (symbolHint||'not specified') + ". " +
-      "Trader-provided context (no live data feed, may be stale): " + (contextHint || 'none provided') + ".\n" + patternContext +
-      "CRITICAL RULES:\n" +
-      "- Only describe what is actually visible. Never invent price levels, indicators, or structure you cannot see.\n" +
-      "- The higher timeframe always dominates the read — state explicitly how it constrains the lower timeframes.\n" +
-      "- If quality/cropping prevents confident analysis, say so explicitly rather than guessing.\n" +
-      "- Give real numeric prices for entry_price/stop_price/take_profit_1/take_profit_2 ONLY if readable directly off the chart's price scale; otherwise null.\n" +
-      "- No system can guarantee a trade outcome — frame confidence honestly, never as a promise.\n" +
-      "- Be extremely concise: each text field max ~10-12 words. Max 4 key_levels. Exactly 5 council entries, one line each.\n\n" +
-      "Return ONLY raw JSON, no markdown fences, no preamble, matching exactly:\n" +
-      '{"readable":true|false,"not_readable_reason":string|null,' +
-      '"detected":{"symbol_guess":string,"timeframe_guess":string,"platform_guess":string},' +
-      '"trend_bias":"bullish"|"bearish"|"ranging"|"ambiguous","trend_confidence":"high"|"medium"|"low",' +
-      '"structure_summary":string,"htf_context":string|null,' +
-      '"key_levels":[{"type":"support"|"resistance"|"order_block"|"fvg"|"liquidity","approx_price":string,"note":string}],' +
-      '"council":[{"persona":"Market Structure"|"Liquidity"|"Risk Manager"|"Psychology"|"Probability","view":string}],' +
-      '"opposing_case":string,"confidence_score":0-100,' +
-      '"trade_idea":{"has_setup":true|false,"direction":"long"|"short"|null,"entry_price":number|null,"stop_price":number|null,"take_profit_1":number|null,"take_profit_2":number|null,"conditions_before_entry":string|null},' +
-      '"no_trade_conditions":string,"reasoning_summary":string}';
-  }
-
-  // ================= VALIDATION LAYER =================
-  // Catches internally-inconsistent AI output before it reaches the journal or calculator —
-  // this is the honest version of "maximum accuracy": not a claim of perfection, a real check.
-  function validateAnalysis(a){
-    if(!a || a.readable === false) return a;
-    if(typeof a.confidence_score === 'number'){
-      a.confidence_score = Math.max(0, Math.min(100, Math.round(a.confidence_score)));
-    }
-    var t = a.trade_idea;
-    if(t && t.has_setup){
-      var entry = t.entry_price, stop = t.stop_price, tp = t.take_profit_1;
-      var issues = [];
-      if(t.direction !== 'long' && t.direction !== 'short') issues.push('has_setup true but direction is missing/invalid');
-      if(isFinite(entry) && isFinite(stop) && entry === stop) issues.push('entry equals stop');
-      if(isFinite(entry) && isFinite(stop) && isFinite(tp)){
-        if(t.direction === 'long' && !(stop < entry && entry < tp)) issues.push('long trade but stop/entry/target are not in the right order');
-        if(t.direction === 'short' && !(stop > entry && entry > tp)) issues.push('short trade but stop/entry/target are not in the right order');
-      }
-      if(issues.length){
-        t.has_setup = false;
-        a._validation_flag = 'AI trade parameters failed a consistency check (' + issues.join(', ') + ') — setup withheld for safety rather than shown with bad numbers.';
-        a.confidence_score = Math.min(a.confidence_score || 0, 30);
-      }
-    }
-    return a;
-  }
-
-  // ================= CONSENSUS MODE =================
-  // Runs both providers concurrently and reconciles. Disagreement lowers confidence and
-  // withholds the trade idea rather than arbitrarily picking one model's guess — two
-  // independent reads disagreeing is itself the signal, not noise to average away.
-  async function runAnalysisConsensus(imageBlocks, promptText){
-    var content = imageBlocks.map(function(img){ return { type:"image", source:{ type:"base64", media_type: img.mediaType, data: img.b64 } }; });
-    content.push({ type:"text", text: promptText });
-    var data = await apiPost('/api/claude', { content: content, max_tokens: 1000, provider: 'both' });
-    var results = data.results || [];
-    var anthropicR = results.filter(function(r){return r.provider==='anthropic';})[0];
-    var openaiR = results.filter(function(r){return r.provider==='openai';})[0];
-    var a = anthropicR && anthropicR.ok ? JSON.parse(anthropicR.text.replace(/```json|```/g,'').trim()) : null;
-    var b = openaiR && openaiR.ok ? JSON.parse(openaiR.text.replace(/```json|```/g,'').trim()) : null;
-    lastCallMeta = { provider: 'consensus', model: 'anthropic+openai', failedOver: false, attempted: ['anthropic','openai'] };
-    if(a && !b) return validateAnalysis(a);
-    if(b && !a) return validateAnalysis(b);
-    if(!a && !b) throw new Error('Both providers failed');
-    return reconcileAnalyses(validateAnalysis(a), validateAnalysis(b));
-  }
-  function reconcileAnalyses(a, b){
-    if(a.readable === false || b.readable === false){
-      return a.readable === false ? b : a;
-    }
-    var agree = a.trend_bias === b.trend_bias;
-    var merged = agree ? a : Object.assign({}, a);
-    merged.confidence_score = Math.round(((a.confidence_score||0) + (b.confidence_score||0)) / 2);
-    merged._consensus = {
-      agreed: agree,
-      anthropic_bias: a.trend_bias, openai_bias: b.trend_bias,
-      anthropic_confidence: a.confidence_score, openai_confidence: b.confidence_score
-    };
-    if(!agree){
-      // Two independent models disagreeing on direction is a real signal — don't hand out a trade idea.
-      merged.trend_bias = 'ambiguous';
-      merged.confidence_score = Math.min(merged.confidence_score, 35);
-      merged.trade_idea = { has_setup:false, direction:null, entry_price:null, stop_price:null, take_profit_1:null, take_profit_2:null, conditions_before_entry:null };
-      merged.no_trade_conditions = 'Anthropic read ' + a.trend_bias + ', OpenAI read ' + b.trend_bias + ' — providers disagree, no setup shown until one chart is clearer.';
-    }
-    return merged;
-  }
-
-  async function runAnalysis(imageBlocks, promptText){
-    var content = imageBlocks.map(function(img){ return { type:"image", source:{ type:"base64", media_type: img.mediaType, data: img.b64 } }; });
-    content.push({ type:"text", text: promptText });
-    var clean = await callClaude(content, 1000);
-    return validateAnalysis(JSON.parse(clean));
-  }
-
-  // Every completed Analyze run is auto-archived as historical/pattern reference data —
-  // same store the Scanner and Pattern Library write to, so it's all one searchable history.
-  async function autoArchiveAnalysis(a, usedSlots, symbolHint){
-    if(a.readable === false) return;
-    var tfCovered = usedSlots.map(function(s){ return s.tf; }).join('+');
-    await Store.addPattern({
-      id: 'p_' + Date.now() + Math.random().toString(36).slice(2,6), ts: Date.now(),
-      symbol: (a.detected && a.detected.symbol_guess) || symbolHint || 'Unknown',
-      timeframe: tfCovered, outcome: 'open',
-      setupType: a.trend_bias + (a.trade_idea && a.trade_idea.has_setup ? ' setup' : ' no-setup'),
-      notes: a.reasoning_summary || '', source: 'analyze-auto', aiProvider: providerTag()
-    });
-  }
-
-  document.getElementById('analyzeBtn').addEventListener('click', async function(){
-    var btn = this;
-    if(!slots[0].b64) return;
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Reading chart…';
-    var resultsCard = document.getElementById('resultsCard');
-    var resultsBody = document.getElementById('resultsBody');
-    resultsCard.style.display = 'block';
-    resultsBody.innerHTML = '<div style="padding:16px;color:var(--text-muted);"><span class="spinner"></span>Analyzing structure across timeframes…</div>';
-    var symbolHint = document.getElementById('symbolInput').value;
-    var tfHint = document.getElementById('timeframeInput').value;
-    var contextHint = document.getElementById('contextInput').value;
-    var usedSlots = slots.filter(function(s){ return s.b64; });
-    try{
-      var prompt = buildAnalysisPrompt(symbolHint, tfHint, contextHint, usedSlots);
-      var useConsensus = Store.get().settings.consensusMode && providerStatusCache.anthropicKeyConfigured && providerStatusCache.openaiKeyConfigured;
-      var parsed = useConsensus ? await runAnalysisConsensus(usedSlots, prompt) : await runAnalysis(usedSlots, prompt);
-      parsed._symbolHint = symbolHint; parsed._tfHint = tfHint;
-      Store.get().lastAnalysis = parsed;
-      renderAnalysis(parsed);
-      await autoArchiveAnalysis(parsed, usedSlots, symbolHint);
-    }catch(e){
-      console.error(e);
-      resultsBody.innerHTML = '<div class="error-banner">Analysis failed — the response could not be read. Try again, or use a smaller/cropped screenshot.</div>';
-    }finally{ btn.disabled = false; btn.innerHTML = 'Analyze Chart'; }
-  });
-
-  function ringColor(score){ return score >= 70 ? 'var(--bull)' : (score >= 40 ? 'var(--gold)' : 'var(--bear)'); }
-
-  function suggestedSizeHtml(trade){
-    if(!trade.has_setup || !isFinite(trade.entry_price) || !isFinite(trade.stop_price)) return '';
-    var key = normalizeSymbol((Store.get().lastAnalysis.detected && Store.get().lastAnalysis.detected.symbol_guess) || document.getElementById('symbolInput').value);
-    if(!key) return '<div class="suggested-size">Numeric entry/stop found, but symbol wasn\'t recognized for auto-sizing — use "Open in Calculator" and pick a preset manually.</div>';
-    var preset = PRESETS[key];
-    var s = Store.get().settings;
-    var stopDist = Math.abs(trade.entry_price - trade.stop_price) / preset.pip;
-    var riskAmt = s.balance * (s.riskPct/100);
-    var lots = stopDist > 0 ? riskAmt / (stopDist * preset.pipValue) : 0;
-    return '<div class="suggested-size"><strong style="color:var(--gold-bright);">Suggested size:</strong> ' + lots.toFixed(2) + ' lots &nbsp;(' + s.riskPct + '% of $' + s.balance.toLocaleString() + ' = $' + riskAmt.toFixed(2) + ' risk, ' + stopDist.toFixed(1) + ' pip/pt stop) — ' + key + ' preset values, verify against your broker.</div>';
-  }
-
-  function renderAnalysis(a){
-    var body = document.getElementById('resultsBody');
-    if(a.readable === false){
-      body.innerHTML = '<div class="not-readable-banner"><strong>Not confidently readable.</strong><br>' + escapeHtml(a.not_readable_reason || 'The AI could not reliably interpret this chart.') + '</div>';
-      return;
-    }
-    var score = typeof a.confidence_score === 'number' ? a.confidence_score : 0;
-    var biasTagClass = a.trend_bias === 'bullish' ? 'bull' : (a.trend_bias === 'bearish' ? 'bear' : 'neutral');
-    var trade = a.trade_idea || {};
-    var grade = classifyGrade(score, trade.has_setup);
-    var bannerHtml = '';
-    if(a._consensus){
-      bannerHtml += a._consensus.agreed
-        ? '<div class="disclaimer" style="margin-bottom:14px;border-color:var(--bull);">Consensus mode: Anthropic and OpenAI agreed on '+escapeHtml(a.trend_bias)+' bias (confidence '+a._consensus.anthropic_confidence+' / '+a._consensus.openai_confidence+').</div>'
-        : '<div class="not-readable-banner" style="margin-bottom:14px;"><strong>Providers disagree.</strong> Anthropic read '+escapeHtml(a._consensus.anthropic_bias)+', OpenAI read '+escapeHtml(a._consensus.openai_bias)+' — treated as ambiguous, no trade idea shown.</div>';
-    }
-    if(a._validation_flag){
-      bannerHtml += '<div class="not-readable-banner" style="margin-bottom:14px;">'+escapeHtml(a._validation_flag)+'</div>';
-    }
-    var levelsHtml = (a.key_levels||[]).map(function(l){
-      return '<div class="level-row"><span class="level-type">'+escapeHtml(l.type||'')+'</span><span class="level-price">'+escapeHtml(l.approx_price||'')+' — '+escapeHtml(l.note||'')+'</span></div>';
-    }).join('') || '<div class="level-row" style="color:var(--text-dim);">No specific levels called out.</div>';
-    var councilHtml = (a.council||[]).map(function(c){
-      return '<div class="council-row"><span class="council-persona">'+escapeHtml(c.persona||'')+'</span><span>'+escapeHtml(c.view||'')+'</span></div>';
-    }).join('') || '<div style="color:var(--text-dim);font-size:12px;">No council breakdown returned.</div>';
-
-    var tradeHtml;
-    if(trade.has_setup){
-      tradeHtml = '<div class="section-text">' +
-        '<div><strong>Direction:</strong> ' + escapeHtml(trade.direction||'—') + '</div>' +
-        '<div><strong>Entry:</strong> ' + (isFinite(trade.entry_price) ? trade.entry_price : '—') + '</div>' +
-        '<div><strong>Stop:</strong> ' + (isFinite(trade.stop_price) ? trade.stop_price : '—') + '</div>' +
-        '<div><strong>TP1 / TP2:</strong> ' + (isFinite(trade.take_profit_1)?trade.take_profit_1:'—') + ' / ' + (isFinite(trade.take_profit_2)?trade.take_profit_2:'—') + '</div>' +
-        '<div><strong>Conditions before entry:</strong> ' + escapeHtml(trade.conditions_before_entry||'—') + '</div>' +
-        '</div>' + suggestedSizeHtml(trade);
-    } else {
-      tradeHtml = '<div class="section-text" style="color:var(--text-muted);">No qualifying setup identified on this chart right now.</div>';
-    }
-
-    body.innerHTML =
-      bannerHtml +
-      '<div style="display:flex;gap:16px;align-items:center;margin-bottom:18px;flex-wrap:wrap;">' +
-        '<div class="ring" style="background:conic-gradient(' + ringColor(score) + ' ' + (score*3.6) + 'deg, var(--border) 0deg);"><div class="ring-inner" style="color:' + ringColor(score) + ';">' + score + '</div></div>' +
-        '<div><span class="tag ' + biasTagClass + '">' + escapeHtml(a.trend_bias||'—') + '</span> <span class="tag neutral">confidence: ' + escapeHtml(a.trend_confidence||'—') + '</span> ' + gradeTagHtml(grade) +
-        '<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">Detected: ' + escapeHtml((a.detected&&a.detected.symbol_guess)||'?') + ' &middot; ' + escapeHtml((a.detected&&a.detected.timeframe_guess)||'?') + ' &middot; ' + escapeHtml((a.detected&&a.detected.platform_guess)||'?') + '</div></div>' +
-      '</div>' +
-      '<div class="section-block"><div class="section-label">Structure</div><div class="section-text">' + escapeHtml(a.structure_summary||'—') + '</div></div>' +
-      (a.htf_context ? '<div class="section-block"><div class="section-label">Higher-Timeframe Context</div><div class="section-text">' + escapeHtml(a.htf_context) + '</div></div>' : '') +
-      '<div class="section-block"><div class="section-label">Key Levels</div>' + levelsHtml + '</div>' +
-      '<div class="section-block"><div class="section-label">Analyst Council</div>' + councilHtml + '</div>' +
-      '<div class="section-block"><div class="section-label">Opposing Case</div><div class="section-text">' + escapeHtml(a.opposing_case||'—') + '</div></div>' +
-      '<div class="section-block"><div class="section-label">Trade Idea</div>' + tradeHtml + '</div>' +
-      '<div class="section-block"><div class="section-label">No-Trade Conditions</div><div class="section-text">' + escapeHtml(a.no_trade_conditions||'—') + '</div></div>' +
-      '<div class="section-block"><div class="section-label">Reasoning Summary</div><div class="section-text">' + escapeHtml(a.reasoning_summary||'—') + '</div></div>' +
-      '<div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;">' +
-        '<button class="primary" id="sendToCalcBtn">Open in Calculator</button><button id="saveToJournalBtn">Save to Journal</button>' +
-      '</div>';
-
-    document.getElementById('sendToCalcBtn').addEventListener('click', function(){
-      goToPage('calculator');
-      var key = normalizeSymbol((a.detected&&a.detected.symbol_guess) || document.getElementById('symbolInput').value);
-      document.getElementById('calcPreset').value = key || 'CUSTOM';
-      updateCalcPreset();
-      if(isFinite(trade.entry_price)) document.getElementById('calcEntry').value = trade.entry_price;
-      if(isFinite(trade.stop_price)) document.getElementById('calcStop').value = trade.stop_price;
-      if(isFinite(trade.take_profit_1)) document.getElementById('calcTP').value = trade.take_profit_1;
-      runCalc();
-    });
-    document.getElementById('saveToJournalBtn').addEventListener('click', async function(){
-      await saveAnalysisToJournal(a, trade, score, grade);
-      var b = document.getElementById('saveToJournalBtn'); b.textContent = 'Saved ✓'; b.disabled = true;
-    });
-  }
-
-  async function saveAnalysisToJournal(a, trade, score, grade){
-    var rr = null;
-    if(isFinite(trade.entry_price) && isFinite(trade.stop_price) && isFinite(trade.take_profit_1)){
-      var risk = Math.abs(trade.entry_price - trade.stop_price);
-      var reward = Math.abs(trade.take_profit_1 - trade.entry_price);
-      if(risk > 0) rr = +(reward/risk).toFixed(2);
-    }
-    var s = Store.get().settings;
-    var ok = await Store.addEntry({
-      id: 'j_' + Date.now() + Math.random().toString(36).slice(2,6), ts: Date.now(),
-      symbol: (a.detected && a.detected.symbol_guess) || a._symbolHint || 'Unknown',
-      timeframe: (a.detected && a.detected.timeframe_guess) || a._tfHint || '',
-      bias: a.trend_bias, confidence: score, grade: grade || null, summary: a.reasoning_summary,
-      tradeIdea: trade, plannedRR: rr, outcome: 'open', resultR: null, session: '', notes: '',
-      riskAmountAtEntry: s.balance * (s.riskPct/100), aiProvider: providerTag()
-    });
-    if(!ok) alert('Could not save — storage write failed. Try again.');
-  }
-
-  // ================= SCANNER — also used for historical/pattern-recognition batch uploads =================
-  var scannerFiles = [];
-  document.getElementById('scannerUploadZone').addEventListener('click', function(){ document.getElementById('scannerFileInput').click(); });
-  document.getElementById('scannerFileInput').addEventListener('change', function(e){
-    scannerFiles = Array.prototype.slice.call(e.target.files || []).slice(0,8);
-    document.getElementById('scannerUploadZone').innerHTML = '<p style="color:var(--text-primary);">' + scannerFiles.length + ' file(s) selected</p>';
-    document.getElementById('scannerRunBtn').disabled = scannerFiles.length === 0;
-  });
-  function fileToB64(file){
-    return new Promise(function(resolve, reject){
-      var reader = new FileReader();
-      reader.onload = function(){ resolve({ b64: reader.result.split(',')[1], mediaType: file.type, name: file.name }); };
-      reader.onerror = reject; reader.readAsDataURL(file);
-    });
-  }
-  var scannerResultsGlobal = [];
-  document.getElementById('scannerRunBtn').addEventListener('click', async function(){
-    var btn = this; btn.disabled = true;
-    var card = document.getElementById('scannerResultsCard');
-    var results = document.getElementById('scannerResults');
-    card.style.display = 'block';
-    var partial = [];
-    results.innerHTML = '<div style="color:var(--text-muted);"><span class="spinner"></span>Scanning 0/' + scannerFiles.length + '…</div>';
-    for(var i=0;i<scannerFiles.length;i++){
-      results.innerHTML = '<div style="color:var(--text-muted);"><span class="spinner"></span>Scanning ' + (i+1) + '/' + scannerFiles.length + '…</div>' + renderScannerPartial(partial);
-      try{
-        var img = await fileToB64(scannerFiles[i]);
-        var prompt = buildAnalysisPrompt('', '', '', [{tf:'uploaded chart'}]);
-        var parsed = await runAnalysis([img], prompt);
-        partial.push({ file: img.name, data: parsed });
-      }catch(e){ partial.push({ file: scannerFiles[i].name, data: null, error: true }); }
-    }
-    partial.sort(function(x,y){
-      var sx = x.data && x.data.readable!==false ? (x.data.confidence_score||0) : -1;
-      var sy = y.data && y.data.readable!==false ? (y.data.confidence_score||0) : -1;
-      return sy - sx;
-    });
-    results.innerHTML = renderScannerPartial(partial, true);
-    btn.disabled = false;
-  });
-  function renderScannerPartial(items, done){
-    scannerResultsGlobal = items;
-    return items.map(function(it, idx){
-      if(it.error || !it.data){ return '<div class="scanner-row"><span class="badge-num">'+(idx+1)+'</span><span style="color:var(--bear);">'+escapeHtml(it.file)+' — failed to analyze</span></div>'; }
-      var d = it.data;
-      if(d.readable === false){ return '<div class="scanner-row"><span class="badge-num">'+(idx+1)+'</span><span style="color:var(--text-dim);">'+escapeHtml(it.file)+' — not confidently readable</span></div>'; }
-      var score = d.confidence_score||0;
-      var biasTagClass = d.trend_bias === 'bullish' ? 'bull' : (d.trend_bias === 'bearish' ? 'bear' : 'neutral');
-      var grade = classifyGrade(score, d.trade_idea && d.trade_idea.has_setup);
-      return '<div class="scanner-row" style="flex-wrap:wrap;"><span class="badge-num">'+(idx+1)+'</span>' +
-        '<div class="ring sm" style="background:conic-gradient(' + ringColor(score) + ' ' + (score*3.6) + 'deg, var(--border) 0deg);"><div class="ring-inner" style="color:' + ringColor(score) + ';">' + score + '</div></div>' +
-        '<div style="flex:1;"><strong>'+escapeHtml((d.detected&&d.detected.symbol_guess)||it.file)+'</strong> <span class="tag '+biasTagClass+'">'+escapeHtml(d.trend_bias||'')+'</span> '+gradeTagHtml(grade)+
-        '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">'+escapeHtml(d.reasoning_summary||'')+'</div></div>' +
-        (done ? '<div style="display:flex;gap:6px;flex-direction:column;"><button class="small" onclick="window.__saveScannerItem('+idx+')">Save to Journal</button><button class="small ghost" onclick="window.__toggleArchiveRow('+idx+')">Log as Pattern</button></div>' : '') +
-        (done ? '<div id="archiveRow'+idx+'" style="display:none;width:100%;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-soft);gap:8px;align-items:center;">' +
-          '<select id="archiveOutcome'+idx+'" style="width:auto;display:inline-block;"><option value="win">Win</option><option value="loss">Loss</option><option value="be">Breakeven</option></select> ' +
-          '<button class="small primary" onclick="window.__archiveScannerItem('+idx+')">Confirm</button></div>' : '') +
-      '</div>';
-    }).join('') || '<div class="empty-state">No results yet.</div>';
-  }
-  window.__saveScannerItem = async function(idx){
-    var it = scannerResultsGlobal[idx];
-    if(!it || !it.data) return;
-    var trade = it.data.trade_idea || {};
-    var grade = classifyGrade(it.data.confidence_score||0, trade.has_setup);
-    await saveAnalysisToJournal(it.data, trade, it.data.confidence_score||0, grade);
-    alert('Saved to journal.');
-  };
-  window.__toggleArchiveRow = function(idx){
-    var row = document.getElementById('archiveRow'+idx);
-    if(row) row.style.display = (row.style.display === 'none') ? 'flex' : 'none';
-  };
-  window.__archiveScannerItem = async function(idx){
-    var it = scannerResultsGlobal[idx];
-    if(!it || !it.data) return;
-    var d = it.data;
-    var outcomeSel = document.getElementById('archiveOutcome'+idx);
-    var outcome = outcomeSel ? outcomeSel.value : 'win';
-    await Store.addPattern({
-      id: 'p_' + Date.now() + Math.random().toString(36).slice(2,6), ts: Date.now(),
-      symbol: (d.detected && d.detected.symbol_guess) || 'Unknown',
-      timeframe: (d.detected && d.detected.timeframe_guess) || '',
-      outcome: outcome, setupType: d.trend_bias + ' — ' + (d.structure_summary||'').slice(0,40),
-      notes: d.reasoning_summary || '', source: 'scanner'
-    });
-    var row = document.getElementById('archiveRow'+idx);
-    if(row){ row.innerHTML = '<span style="color:var(--bull);font-size:12px;">Logged to Pattern Library ✓</span>'; }
-  };
-
-
-  // ================= PATTERN LIBRARY =================
-  var patImageData = null; // { b64, mediaType } — analyzed once for extraction, not persisted raw
-  document.getElementById('patImageZone').addEventListener('click', function(){ document.getElementById('patImageFile').click(); });
-  document.getElementById('patImageFile').addEventListener('change', async function(e){
-    var file = e.target.files && e.target.files[0];
-    if(!file) return;
-    if(!file.type.match(/image\/(png|jpeg|jpg)/)){ alert('Please upload a PNG or JPG.'); return; }
-    var reader = new FileReader();
-    reader.onload = async function(){
-      patImageData = { b64: reader.result.split(',')[1], mediaType: file.type };
-      document.getElementById('patImageZone').innerHTML = '<img src="'+reader.result+'" class="preview-img">';
-      await extractPatternFromImage();
-    };
-    reader.readAsDataURL(file);
-  });
-  async function extractPatternFromImage(){
-    if(!patImageData) return;
-    var status = document.getElementById('patExtractStatus');
-    status.innerHTML = '<span class="spinner"></span>Reading setup and outcome from the image…';
-    try{
-      var prompt = "You are reviewing a trading chart screenshot that shows how a past trade played out (entry, and visible outcome — price hitting a target, stop, or still open). " +
-        "Only describe what's actually visible; don't invent details. Be concise (each field max ~15 words).\n" +
-        "Return ONLY raw JSON: {\"symbol_guess\":string,\"timeframe_guess\":string,\"setup_description\":string,\"outcome_guess\":\"win\"|\"loss\"|\"be\"|\"unclear\",\"notes\":string}";
-      var content = [{ type:"image", source:{ type:"base64", media_type: patImageData.mediaType, data: patImageData.b64 } }, { type:"text", text: prompt }];
-      var clean = await callClaude(content, 600);
-      var parsed = JSON.parse(clean);
-      document.getElementById('patSymbol').value = parsed.symbol_guess || '';
-      document.getElementById('patTf').value = parsed.timeframe_guess || '';
-      document.getElementById('patSetupType').value = parsed.setup_description || '';
-      document.getElementById('patNotes').value = parsed.notes || '';
-      if(parsed.outcome_guess === 'win' || parsed.outcome_guess === 'loss' || parsed.outcome_guess === 'be'){
-        document.getElementById('patOutcome').value = parsed.outcome_guess;
-        status.innerHTML = '<span style="color:var(--bull);">Extracted from image — review and edit before saving.</span>';
-      } else {
-        status.innerHTML = '<span style="color:var(--gold-bright);">Extracted setup details, but the outcome wasn\'t clear from the image — the Outcome dropdown below still needs your input, don\'t assume it\'s correct.</span>';
-      }
-    }catch(e){
-      status.innerHTML = '<span style="color:var(--bear);">Could not extract from image — fill in the fields manually.</span>';
-    }
-  }
-  document.getElementById('patSaveBtn').addEventListener('click', async function(){
-    var symbol = document.getElementById('patSymbol').value.trim();
-    var setupType = document.getElementById('patSetupType').value.trim();
-    if(!symbol || !setupType){ alert('Symbol and setup type are required.'); return; }
-    var ok = await Store.addPattern({
-      id: 'p_' + Date.now(), ts: Date.now(), symbol: symbol,
-      timeframe: document.getElementById('patTf').value.trim(),
-      outcome: document.getElementById('patOutcome').value,
-      setupType: setupType, notes: document.getElementById('patNotes').value.trim(), source: 'manual'
-    });
-    if(ok){
-      document.getElementById('patSymbol').value=''; document.getElementById('patTf').value='';
-      document.getElementById('patSetupType').value=''; document.getElementById('patNotes').value='';
-      document.getElementById('patImageZone').innerHTML = '<div style="font-size:16px;">&#8593;</div><p>Upload a result screenshot to auto-fill (optional)</p>';
-      document.getElementById('patExtractStatus').innerHTML = '';
-      patImageData = null;
-      renderPatterns();
-    } else { alert('Could not save — storage write failed.'); }
-  });
-  document.getElementById('patInsightsBtn').addEventListener('click', async function(){
-    var btn = this; btn.disabled = true;
-    var box = document.getElementById('patInsightsBox');
-    var patterns = Store.get().patterns;
-    if(patterns.length < 3){
-      box.innerHTML = '<div class="disclaimer">Log at least 3 patterns first — too few to say anything meaningful yet.</div>';
-      btn.disabled = false; return;
-    }
-    box.innerHTML = '<div style="color:var(--text-muted);"><span class="spinner"></span>Reviewing your logged patterns…</div>';
-    var summary = patterns.slice(0,40).map(function(p){ return p.symbol+' | '+p.timeframe+' | '+p.setupType+' | '+p.outcome+(p.notes?(' | '+p.notes.slice(0,60)):''); }).join('\n');
-    var prompt = "You are reviewing a trader's logged historical setups, with awareness of their whole desk, not just this log (qualitative log, not a statistical backtest — say so if the sample is too small to conclude anything). " +
-      buildDeskContext() + "\n\n" +
-      "Pattern Library data (symbol | timeframe | setup | outcome | notes):\n" + summary + "\n\n" +
-      "Identify recurring conditions in winning vs losing setups, if any are actually visible in this data — don't invent patterns the data doesn't support. Be concise, max ~15 words per field.\n" +
-      "Return ONLY raw JSON: {\"recurring_in_wins\":string,\"recurring_in_losses\":string,\"sample_size_caveat\":string,\"one_improvement\":string}";
-    try{
-      var clean = await callClaude(prompt, 800);
-      var parsed = JSON.parse(clean);
-      box.innerHTML =
-        '<div class="section-block"><div class="section-label">Recurring in Wins</div><div class="section-text">'+escapeHtml(parsed.recurring_in_wins||'—')+'</div></div>' +
-        '<div class="section-block"><div class="section-label">Recurring in Losses</div><div class="section-text">'+escapeHtml(parsed.recurring_in_losses||'—')+'</div></div>' +
-        '<div class="section-block"><div class="section-label">One Improvement</div><div class="section-text" style="color:var(--gold-bright);font-weight:600;">'+escapeHtml(parsed.one_improvement||'—')+'</div></div>' +
-        '<div class="disclaimer" style="margin-top:10px;">'+escapeHtml(parsed.sample_size_caveat||'Small sample — treat as a prompt to look closer, not a proven edge.')+'</div>';
-    }catch(e){
-      box.innerHTML = '<div class="error-banner">Review failed — try again in a moment.</div>';
-    }finally{ btn.disabled = false; }
-  });
-  function renderPatterns(){
-    var patterns = Store.get().patterns;
-    var statsBox = document.getElementById('patStatsBox');
-    var bySetup = {};
-    patterns.forEach(function(p){
-      var s = p.setupType || 'Untagged';
-      if(!bySetup[s]) bySetup[s] = {total:0, win:0, loss:0};
-      bySetup[s].total++;
-      if(p.outcome==='win') bySetup[s].win++;
-      if(p.outcome==='loss') bySetup[s].loss++;
-    });
-    var setupKeys = Object.keys(bySetup);
-    statsBox.innerHTML = setupKeys.length ? setupKeys.map(function(s){
-      var d = bySetup[s]; var wr = (d.win+d.loss)>0 ? ((d.win/(d.win+d.loss))*100).toFixed(0)+'%' : '—';
-      return '<div class="level-row"><span>'+escapeHtml(s)+'</span><span style="color:var(--text-muted);font-size:12px;">'+d.total+' logged &middot; '+wr+' win rate</span></div>';
-    }).join('') + '<div class="disclaimer" style="margin-top:10px;">Small sample sizes here are not statistically reliable — treat as a memory aid, not a proven edge.</div>' : '<div class="empty-state">No patterns logged yet.</div>';
-
-    var list = document.getElementById('patternList');
-    list.innerHTML = patterns.length ? patterns.map(function(p){
-      var d = new Date(p.ts);
-      var cls = p.outcome==='win'?'bull':(p.outcome==='loss'?'bear':'neutral');
-      var srcTag = p.source && p.source !== 'manual' ? ' <span class="tag neutral">'+escapeHtml(p.source)+'</span>' : '';
-      return '<div class="pattern-card"><div class="journal-head"><div><span class="journal-symbol">'+escapeHtml(p.symbol)+'</span> <span class="tag neutral">'+escapeHtml(p.timeframe||'')+'</span> <span class="tag '+cls+'">'+escapeHtml(p.outcome)+'</span>'+srcTag+
-        '<div class="journal-meta">'+escapeHtml(p.setupType)+' &middot; '+d.toLocaleDateString()+'</div></div>' +
-        '<button class="small danger ghost" onclick="window.__deletePattern(\''+p.id+'\')">Delete</button></div>' +
-        (p.notes ? '<div style="font-size:12.5px;color:var(--text-muted);margin-top:8px;">'+escapeHtml(p.notes)+'</div>' : '') + '</div>';
-    }).join('') : '<div class="empty-state"><div class="big">&#9633;</div>No patterns logged yet — add your first above.</div>';
-  }
-  window.__deletePattern = async function(id){ await Store.deletePattern(id); renderPatterns(); };
-
-  // ================= CALCULATOR =================
-  var calcPreset = document.getElementById('calcPreset');
-  Object.keys(PRESETS).forEach(function(k){
-    var opt = document.createElement('option'); opt.value = k; opt.textContent = k === 'CUSTOM' ? 'Custom / other' : k;
-    calcPreset.appendChild(opt);
-  });
-  calcPreset.value = 'EURUSD';
-  function updateCalcPreset(){
-    var p = PRESETS[calcPreset.value];
-    if(p && calcPreset.value !== 'CUSTOM'){ document.getElementById('calcPipSize').value = p.pip; document.getElementById('calcPipValue').value = p.pipValue; }
-    runCalc();
-  }
-  calcPreset.addEventListener('change', updateCalcPreset);
-  ['calcBalance','calcRiskPct','calcEntry','calcStop','calcTP','calcPipSize','calcPipValue'].forEach(function(id){
-    document.getElementById(id).addEventListener('input', runCalc);
-  });
-  function runCalc(){
-    var balance = parseFloat(document.getElementById('calcBalance').value) || 0;
-    var riskPct = parseFloat(document.getElementById('calcRiskPct').value) || 0;
-    var entry = parseFloat(document.getElementById('calcEntry').value);
-    var stop = parseFloat(document.getElementById('calcStop').value);
-    var tp = parseFloat(document.getElementById('calcTP').value);
-    var pipSize = parseFloat(document.getElementById('calcPipSize').value);
-    var pipValue = parseFloat(document.getElementById('calcPipValue').value);
-    var riskAmt = balance * (riskPct/100);
-    document.getElementById('outRiskAmt').textContent = '$' + riskAmt.toFixed(2);
-    if(!isFinite(entry) || !isFinite(stop) || !pipSize || entry === stop){
-      document.getElementById('outStopDist').textContent = '—'; document.getElementById('outLots').textContent = '—'; document.getElementById('outRR').textContent = '—'; return;
-    }
-    var stopDistPrice = Math.abs(entry - stop);
-    var stopDistPips = stopDistPrice / pipSize;
-    document.getElementById('outStopDist').textContent = stopDistPips.toFixed(1) + ' pips/pts';
-    document.getElementById('outLots').textContent = (pipValue > 0 && stopDistPips > 0) ? (riskAmt / (stopDistPips * pipValue)).toFixed(2) + ' lots' : '—';
-    document.getElementById('outRR').textContent = isFinite(tp) ? ('1 : ' + (Math.abs(tp - entry) / stopDistPrice).toFixed(2)) : '—';
-  }
-
-  // ================= SETTINGS SYNC (single source, propagates to Calculator + Dashboard) =================
-  function applySettingsToInputs(){
-    var s = Store.get().settings;
-    document.getElementById('setBalance').value = s.balance;
-    document.getElementById('setRiskPct').value = s.riskPct;
-    document.getElementById('setDailyLoss').value = s.dailyLoss;
-    document.getElementById('setAiProvider').value = s.aiProvider || 'anthropic';
-    document.getElementById('setConsensusMode').checked = !!s.consensusMode;
-    document.getElementById('calcBalance').value = s.balance;
-    document.getElementById('calcRiskPct').value = s.riskPct;
-  }
-  ['setBalance','setRiskPct','setDailyLoss','setAiProvider','setConsensusMode'].forEach(function(id){
-    document.getElementById(id).addEventListener('change', async function(){
-      await Store.setSettings({
-        balance: parseFloat(document.getElementById('setBalance').value) || 0,
-        riskPct: parseFloat(document.getElementById('setRiskPct').value) || 0,
-        dailyLoss: parseFloat(document.getElementById('setDailyLoss').value) || 0,
-        aiProvider: document.getElementById('setAiProvider').value,
-        consensusMode: document.getElementById('setConsensusMode').checked
-      });
-      applySettingsToInputs(); runCalc(); renderDashboard();
-    });
-  });
-  var providerStatusCache = { anthropicKeyConfigured:false, openaiKeyConfigured:false, openrouterKeyConfigured:false };
-  async function checkProviderStatus(){
-    var box = document.getElementById('providerStatusBox');
-    try{
-      var res = await fetch('/api/health');
-      var data = await res.json();
-      providerStatusCache = data;
-      var parts = [];
-      parts.push('Anthropic: ' + (data.anthropicKeyConfigured ? '✓' : '✗'));
-      parts.push('OpenAI: ' + (data.openaiKeyConfigured ? '✓' : '✗'));
-      parts.push('OpenRouter: ' + (data.openrouterKeyConfigured ? '✓' : '✗'));
-      parts.push('Data backend: ' + (data.dataBackend || '?'));
-      box.innerHTML = parts.join(' &middot; ');
-    }catch(e){ box.textContent = 'Could not reach server to check key status.'; }
-    await refreshKeyStatusUI();
-  }
-
-  var KEY_ID_PREFIX = { anthropic: 'anth', openai: 'openai', openrouter: 'openrouter' };
-  async function refreshKeyStatusUI(){
-    try{
-      var data = await apiGet('/api/config/keys');
-      ['anthropic','openai','openrouter'].forEach(function(p){
-        var el = document.getElementById(KEY_ID_PREFIX[p]+'KeyStatus');
-        if(el) el.textContent = data[p].configured ? '(' + data[p].masked + ', via ' + data[p].source + ')' : '(not set)';
-      });
-    }catch(e){ /* auth gate already handles 401s */ }
-  }
-  ['anthropic','openai','openrouter'].forEach(function(p){
-    var prefix = KEY_ID_PREFIX[p];
-    var saveBtn = document.getElementById(prefix+'KeySaveBtn');
-    var clearBtn = document.getElementById(prefix+'KeyClearBtn');
-    if(!saveBtn || !clearBtn) { console.error('Key management: missing DOM elements for provider', p); return; }
-    saveBtn.addEventListener('click', async function(){
-      var val = document.getElementById(prefix+'KeyInput').value.trim();
-      if(!val){ alert('Enter a key first.'); return; }
-      var body = {}; body[p] = val;
-      try{ await apiPut('/api/config/keys', body); document.getElementById(prefix+'KeyInput').value=''; await refreshKeyStatusUI(); await checkProviderStatus(); }
-      catch(e){ alert('Could not save key: ' + e.message); }
-    });
-    clearBtn.addEventListener('click', async function(){
-      try{ await apiDelete('/api/config/keys/'+p); await refreshKeyStatusUI(); await checkProviderStatus(); }
-      catch(e){ alert('Could not clear key: ' + e.message); }
-    });
-  });
-
-  // ================= CALL LOG VIEWER =================
-  async function renderCallLog(){
-    var box = document.getElementById('callLogBox');
-    try{
-      var log = await apiGet('/api/logs?limit=15');
-      if(!log.length){ box.innerHTML = '<div class="empty-state">No calls logged yet this session.</div>'; return; }
-      box.innerHTML = log.map(function(l){
-        var d = new Date(l.ts);
-        var statusColor = l.ok ? 'var(--bull)' : 'var(--bear)';
-        return '<div class="level-row"><span><span style="color:'+statusColor+';">'+(l.ok?'✓':'✗')+'</span> '+escapeHtml(l.provider)+(l.model?(' — '+escapeHtml(l.model)):'')+(l.consensus?' (consensus)':'')+'</span><span style="color:var(--text-dim);font-size:11px;">'+l.latencyMs+'ms &middot; '+d.toLocaleTimeString()+'</span></div>';
-      }).join('');
-    }catch(e){ box.innerHTML = '<div class="empty-state">Could not load call log.</div>'; }
-  }
-  document.getElementById('refreshLogsBtn').addEventListener('click', renderCallLog);
-
-  // ================= JOURNAL =================
-  function renderJournal(){
-    var entries = Store.get().entries;
-    var list = document.getElementById('journalList');
-    if(entries.length === 0){ list.innerHTML = '<div class="empty-state"><div class="big">&#9633;</div>No journal entries yet.<br>Save an analysis from Analyze or Scanner to start tracking.</div>'; return; }
-    var sessions = ['','Asia','London','New York','Overlap'];
-    list.innerHTML = entries.map(function(e){
-      var biasClass = e.bias === 'bullish' ? 'bull' : (e.bias === 'bearish' ? 'bear' : 'neutral');
-      var d = new Date(e.ts);
-      var t = e.tradeIdea || {};
-      return '<div class="journal-card"><div class="journal-head"><div><span class="journal-symbol">'+escapeHtml(e.symbol||'?')+'</span> <span class="tag '+biasClass+'">'+escapeHtml(e.bias||'—')+'</span> '+gradeTagHtml(e.grade)+
-        '<div class="journal-meta">'+escapeHtml(e.timeframe||'')+' &middot; confidence '+e.confidence+(e.plannedRR?(' &middot; planned R:R 1:'+e.plannedRR):'')+(e.aiProvider?(' &middot; '+escapeHtml(e.aiProvider)):'')+' &middot; '+d.toLocaleString()+'</div></div>' +
-        '<button class="small danger ghost" onclick="window.__deleteEntry(\''+e.id+'\')">Delete</button></div>' +
-        '<div style="font-size:12.5px;color:var(--text-muted);margin-top:8px;">'+escapeHtml(e.summary||'')+'</div>' +
-        '<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:11.5px;color:var(--text-dim);">Trade parameters — edit if the AI misread a price</summary>' +
-          '<div class="field-row3" style="margin-top:8px;">' +
-            '<div class="field" style="margin-bottom:0;"><label>Entry</label><input type="number" step="any" value="'+(isFinite(t.entry_price)?t.entry_price:'')+'" onchange="window.__setTradeParam(\''+e.id+'\',\'entry_price\',this.value)"></div>' +
-            '<div class="field" style="margin-bottom:0;"><label>Stop</label><input type="number" step="any" value="'+(isFinite(t.stop_price)?t.stop_price:'')+'" onchange="window.__setTradeParam(\''+e.id+'\',\'stop_price\',this.value)"></div>' +
-            '<div class="field" style="margin-bottom:0;"><label>TP1</label><input type="number" step="any" value="'+(isFinite(t.take_profit_1)?t.take_profit_1:'')+'" onchange="window.__setTradeParam(\''+e.id+'\',\'take_profit_1\',this.value)"></div>' +
-          '</div></details>' +
-        '<div class="outcome-pills">' + ['open','win','loss','be'].map(function(o){
-          var cls = o==='be' ? 'be' : o; var label = o==='be' ? 'Breakeven' : (o.charAt(0).toUpperCase()+o.slice(1));
-          var active = e.outcome === o ? ' active '+cls : '';
-          return '<span class="pill'+active+'" onclick="window.__setOutcome(\''+e.id+'\',\''+o+'\')">'+label+'</span>';
-        }).join('') + '</div>' +
-        '<div class="field-row" style="margin-top:10px;">' +
-          '<div class="field" style="margin-bottom:0;"><label>Result (R multiple, e.g. 2.1 or -1)</label><input type="number" step="any" value="'+(e.resultR!==null&&e.resultR!==undefined?e.resultR:'')+'" onchange="window.__setResultR(\''+e.id+'\', this.value)"></div>' +
-          '<div class="field" style="margin-bottom:0;"><label>Session</label><select onchange="window.__setSession(\''+e.id+'\', this.value)">' + sessions.map(function(s){ return '<option value="'+s+'"'+(e.session===s?' selected':'')+'>'+(s||'Not set')+'</option>'; }).join('') + '</select></div>' +
-        '</div>' +
-        '<textarea placeholder="Notes — what went right, mistakes, emotion, lessons…" style="margin-top:10px;" onchange="window.__setNotes(\''+e.id+'\', this.value)">'+escapeHtml(e.notes||'')+'</textarea></div>';
-    }).join('');
-  }
-  window.__deleteEntry = async function(id){ await Store.deleteEntry(id); renderJournal(); };
-  window.__setOutcome = async function(id, outcome){ await Store.updateEntry(id, {outcome:outcome}); renderJournal(); };
-  window.__setTradeParam = async function(id, field, val){
-    var entries = Store.get().entries;
-    var entry = entries.filter(function(e){return e.id===id;})[0];
-    if(!entry) return;
-    var t = Object.assign({}, entry.tradeIdea || {});
-    t[field] = val === '' ? null : parseFloat(val);
-    await Store.updateEntry(id, {tradeIdea: t});
-  };
-  window.__setResultR = async function(id, val){ await Store.updateEntry(id, {resultR: val === '' ? null : parseFloat(val)}); };
-  window.__setSession = async function(id, val){ await Store.updateEntry(id, {session: val}); };
-  window.__setNotes = async function(id, notes){ await Store.updateEntry(id, {notes: notes}); };
-
-  function exportJournalCsv(){
-    var entries = Store.get().entries;
-    if(entries.length === 0){ alert('No journal entries to export yet.'); return; }
-    var headers = ['date','symbol','timeframe','bias','confidence','grade','outcome','resultR','plannedRR','session','entry','stop','tp1','notes'];
-    var rows = entries.map(function(e){
-      var t = e.tradeIdea || {};
-      return [
-        new Date(e.ts).toISOString(), e.symbol||'', e.timeframe||'', e.bias||'', e.confidence!=null?e.confidence:'',
-        e.grade||'', e.outcome||'', e.resultR!=null?e.resultR:'', e.plannedRR!=null?e.plannedRR:'', e.session||'',
-        isFinite(t.entry_price)?t.entry_price:'', isFinite(t.stop_price)?t.stop_price:'', isFinite(t.take_profit_1)?t.take_profit_1:'',
-        e.notes||''
-      ].map(function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; }).join(',');
-    });
-    var csv = headers.join(',') + '\n' + rows.join('\n');
-    var blob = new Blob([csv], {type:'text/csv'});
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url; a.download = 'ai-b-trading-journal-'+new Date().toISOString().slice(0,10)+'.csv';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
-  document.getElementById('exportCsvBtn').addEventListener('click', exportJournalCsv);
-
-  // ================= DASHBOARD =================
-  function renderDashboard(){
-    var entries = Store.get().entries;
-    var patterns = Store.get().patterns;
-    var s = Store.get().settings;
-    var total = entries.length;
-    var wins = entries.filter(function(e){ return e.outcome === 'win'; }).length;
-    var losses = entries.filter(function(e){ return e.outcome === 'loss'; }).length;
-    var decided = wins + losses;
-    var winRate = decided > 0 ? ((wins/decided)*100).toFixed(0) : '—';
-    var avgConf = total > 0 ? (entries.reduce(function(sum,e){return sum+(e.confidence||0);},0)/total).toFixed(0) : '—';
-    var patWins = patterns.filter(function(p){return p.outcome==='win';}).length;
-    var patLosses = patterns.filter(function(p){return p.outcome==='loss';}).length;
-    var patDecided = patWins + patLosses;
-    var patWinRate = patDecided > 0 ? ((patWins/patDecided)*100).toFixed(0) : '—';
-    document.getElementById('dash-stats').innerHTML =
-      '<div class="stat-box"><div class="stat-label">Total analyses saved</div><div class="stat-value">'+total+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">Win rate (decided trades)</div><div class="stat-value gold">'+winRate+(winRate!=='—'?'%':'')+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">Avg. AI confidence</div><div class="stat-value">'+avgConf+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">Pattern Library size</div><div class="stat-value">'+patterns.length+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">Pattern Library win rate</div><div class="stat-value gold">'+patWinRate+(patWinRate!=='—'?'%':'')+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">AI provider</div><div class="stat-value small">'+((s.aiProvider||'anthropic')==='openai'?'OpenAI':'Anthropic')+(s.consensusMode?' (consensus)':'')+'</div></div>';
-
-    var todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    var currentRiskAmt = s.balance * (s.riskPct/100);
-    var todaysClosed = entries.filter(function(e){ return e.ts >= todayStart.getTime() && (e.outcome==='win'||e.outcome==='loss') && e.resultR !== null && e.resultR !== undefined; });
-    var usedFallback = false;
-    var realizedLossToday = todaysClosed.reduce(function(sum,e){
-      if(e.resultR >= 0) return sum;
-      var riskAtEntry = isFinite(e.riskAmountAtEntry) ? e.riskAmountAtEntry : (usedFallback = true, currentRiskAmt);
-      return sum + Math.abs(e.resultR) * riskAtEntry;
-    }, 0);
-    var dailyLimitAmt = s.balance * (s.dailyLoss/100);
-    var pctUsed = dailyLimitAmt > 0 ? Math.min(100, (realizedLossToday/dailyLimitAmt)*100) : 0;
-    var overLimit = realizedLossToday >= dailyLimitAmt && dailyLimitAmt > 0;
-    document.getElementById('dailyRiskBox').innerHTML =
-      '<div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:8px;"><span>Realized loss today: $'+realizedLossToday.toFixed(2)+'</span><span>Limit: $'+dailyLimitAmt.toFixed(2)+' ('+s.dailyLoss+'%)</span></div>' +
-      '<div style="height:8px;background:var(--panel-raised);border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+pctUsed+'%;background:'+(overLimit?'var(--bear)':'var(--gold)')+';"></div></div>' +
-      (overLimit ? '<div style="color:var(--bear);font-size:12px;margin-top:8px;">Daily loss limit reached based on your journal — consider stopping for the day.</div>' : '<div style="color:var(--text-dim);font-size:11.5px;margin-top:8px;">Based on today\'s closed trades with a logged result, using the risk amount actually set when each trade was saved'+(usedFallback ? ' (one or more older entries used your current settings as an approximation — they predate this being tracked per-trade)' : '')+'.</div>');
-
-    var recentBox = document.getElementById('dash-recent');
-    recentBox.innerHTML = total === 0 ? '<div class="empty-state">No entries yet — head to Analyze Chart to log your first read.</div>' :
-      entries.slice(0,5).map(function(e){
-        var d = new Date(e.ts); var biasClass = e.bias === 'bullish' ? 'bull' : (e.bias === 'bearish' ? 'bear' : 'neutral');
-        return '<div class="level-row"><span><span class="journal-symbol" style="font-size:12px;">'+escapeHtml(e.symbol||'?')+'</span> <span class="tag '+biasClass+'">'+escapeHtml(e.bias||'')+'</span></span><span style="color:var(--text-dim);font-size:11px;">'+d.toLocaleDateString()+'</span></div>';
-      }).join('');
-  }
-
-  // ================= COACH =================
-  document.getElementById('coachRunBtn').addEventListener('click', async function(){
-    var btn = this; btn.disabled = true;
-    var status = document.getElementById('coachStatus');
-    var card = document.getElementById('coachResultsCard');
-    var results = document.getElementById('coachResults');
-    status.innerHTML = '<span class="spinner"></span>Reviewing your journal…';
-    var closed = Store.get().entries.filter(function(e){ return e.outcome === 'win' || e.outcome === 'loss' || e.outcome === 'be'; });
-    if(closed.length === 0){
-      status.innerHTML = '<div class="error-banner" style="color:var(--text-muted);background:var(--panel-raised);border-color:var(--border);">No closed trades in your journal yet — mark some entries as Win/Loss/Breakeven first.</div>';
-      btn.disabled = false; return;
-    }
-    var summary = closed.slice(0,20).map(function(e){
-      return e.symbol + ' | ' + e.bias + ' | conf ' + e.confidence + ' | outcome ' + e.outcome + (e.resultR!==null&&e.resultR!==undefined?(' | R '+e.resultR):'') + (e.session?(' | '+e.session):'') + (e.notes?(' | notes: '+e.notes.slice(0,80)):'');
-    }).join('\n');
-    var prompt = "You are an evidence-based trading psychology and performance coach with full awareness of this trader's desk — not just their journal. " +
-      buildDeskContext() + "\n\n" +
-      "Detailed closed-trade history (symbol | bias | AI confidence at entry | outcome | R result | session | notes):\n" + summary + "\n\n" +
-      "Base every observation ONLY on this data — don't invent unsupported patterns, and avoid hindsight bias. If the Pattern Library shows a different win rate than the Journal, you can note that as worth watching.\n" +
-      "Be concise: each array item max ~15 words, max 4 items per array.\n" +
-      "Return ONLY raw JSON: {\"strengths\":[string],\"mistakes\":[string],\"pattern_observed\":string,\"one_focus_for_next_week\":string}";
-    try{
-      var clean = await callClaude(prompt, 1000);
-      var parsed = JSON.parse(clean);
-      status.innerHTML = ''; card.style.display = 'block';
-      results.innerHTML =
-        '<div class="section-block"><div class="section-label">Strengths</div><div class="section-text"><ul style="margin:0;padding-left:18px;">' + (parsed.strengths||[]).map(function(s){return '<li>'+escapeHtml(s)+'</li>';}).join('') + '</ul></div></div>' +
-        '<div class="section-block"><div class="section-label">Mistakes</div><div class="section-text"><ul style="margin:0;padding-left:18px;">' + (parsed.mistakes||[]).map(function(s){return '<li>'+escapeHtml(s)+'</li>';}).join('') + '</ul></div></div>' +
-        '<div class="section-block"><div class="section-label">Pattern Observed</div><div class="section-text">' + escapeHtml(parsed.pattern_observed||'—') + '</div></div>' +
-        '<div class="section-block"><div class="section-label">One Focus For Next Week</div><div class="section-text" style="color:var(--gold-bright);font-weight:600;">' + escapeHtml(parsed.one_focus_for_next_week||'—') + '</div></div>' +
-        '<div class="disclaimer" style="margin-top:14px;">Based on your last ' + Math.min(closed.length,20) + ' closed trades. Only as good as what you\'ve logged.</div>';
-    }catch(e){ status.innerHTML = '<div class="error-banner">Coaching review failed — try again in a moment.</div>'; }
-    finally{ btn.disabled = false; }
-  });
-
-  // ================= STATS =================
-  function renderStats(){
-    var entries = Store.get().entries;
-    var wins = entries.filter(function(e){ return e.outcome === 'win'; });
-    var losses = entries.filter(function(e){ return e.outcome === 'loss'; });
-    var decided = wins.length + losses.length;
-    var winRate = decided > 0 ? (wins.length/decided) : null;
-    var winRs = wins.filter(function(e){return isFinite(e.resultR);}).map(function(e){return e.resultR;});
-    var lossRs = losses.filter(function(e){return isFinite(e.resultR);}).map(function(e){return Math.abs(e.resultR);});
-    var avgWinR = winRs.length ? winRs.reduce(function(a,b){return a+b;},0)/winRs.length : 0;
-    var avgLossR = lossRs.length ? lossRs.reduce(function(a,b){return a+b;},0)/lossRs.length : 0;
-    var expectancy = (winRate !== null && (winRs.length || lossRs.length)) ? (winRate*avgWinR - (1-winRate)*avgLossR) : null;
-    var grossWin = winRs.reduce(function(a,b){return a+b;},0);
-    var grossLoss = lossRs.reduce(function(a,b){return a+b;},0);
-    var profitFactor = grossLoss > 0 ? (grossWin/grossLoss) : (grossWin > 0 ? Infinity : null);
-    document.getElementById('statsGrid').innerHTML =
-      '<div class="stat-box"><div class="stat-label">Total logged</div><div class="stat-value">'+entries.length+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">Win rate</div><div class="stat-value bull">'+(winRate!==null?(winRate*100).toFixed(1)+'%':'—')+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">W / L / Open</div><div class="stat-value small">'+wins.length+' / '+losses.length+' / '+entries.filter(function(e){return e.outcome==='open';}).length+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">Expectancy (R)</div><div class="stat-value '+(expectancy>0?'bull':(expectancy<0?'bear':''))+'">'+(expectancy!==null?expectancy.toFixed(2):'—')+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">Profit factor</div><div class="stat-value gold">'+(profitFactor!==null?(profitFactor===Infinity?'∞':profitFactor.toFixed(2)):'—')+'</div></div>' +
-      '<div class="stat-box"><div class="stat-label">Avg win R / avg loss R</div><div class="stat-value small">'+avgWinR.toFixed(2)+' / '+avgLossR.toFixed(2)+'</div></div>';
-    var bySymbol = {};
-    entries.forEach(function(e){ var s = e.symbol || 'Unknown'; if(!bySymbol[s]) bySymbol[s] = {total:0, win:0, loss:0}; bySymbol[s].total++; if(e.outcome==='win') bySymbol[s].win++; if(e.outcome==='loss') bySymbol[s].loss++; });
-    var symKeys = Object.keys(bySymbol);
-    document.getElementById('statsBySymbol').innerHTML = symKeys.length ? symKeys.map(function(s){
-      var d = bySymbol[s]; var wr = (d.win+d.loss) > 0 ? ((d.win/(d.win+d.loss))*100).toFixed(0)+'%' : '—';
-      return '<div class="level-row"><span class="journal-symbol" style="font-size:12.5px;">'+escapeHtml(s)+'</span><span style="color:var(--text-muted);font-size:12px;">'+d.total+' logged &middot; '+wr+' win rate</span></div>';
-    }).join('') : '<div class="empty-state">No data yet.</div>';
-    var bySession = {};
-    entries.forEach(function(e){ var s = e.session || 'Not tagged'; if(!bySession[s]) bySession[s] = {total:0, win:0, loss:0}; bySession[s].total++; if(e.outcome==='win') bySession[s].win++; if(e.outcome==='loss') bySession[s].loss++; });
-    var sessKeys = Object.keys(bySession);
-    document.getElementById('statsBySession').innerHTML = sessKeys.length ? sessKeys.map(function(s){
-      var d = bySession[s]; var wr = (d.win+d.loss) > 0 ? ((d.win/(d.win+d.loss))*100).toFixed(0)+'%' : '—';
-      return '<div class="level-row"><span>'+escapeHtml(s)+'</span><span style="color:var(--text-muted);font-size:12px;">'+d.total+' logged &middot; '+wr+' win rate</span></div>';
-    }).join('') : '<div class="empty-state">No data yet.</div>';
-  }
-
-  // ================= FRANKY LAMPS (shares Store, overlay only) =================
-  var flOpen = false;
-  var flHistory = [];
-  document.getElementById('flToggle').addEventListener('click', function(){
-    flOpen = !flOpen;
-    document.getElementById('flPanel').classList.toggle('open', flOpen);
-  });
-  document.getElementById('flClose').addEventListener('click', function(){ flOpen = false; document.getElementById('flPanel').classList.remove('open'); });
-
-
-  function addFlMsg(role, text){
-    var wrap = document.getElementById('flMessages');
-    var div = document.createElement('div');
-    div.className = 'fl-msg ' + (role==='user'?'user':'assistant');
-    div.textContent = text;
-    wrap.appendChild(div);
-    wrap.scrollTop = wrap.scrollHeight;
-  }
-
-  async function sendFrankyMessage(){
-    var input = document.getElementById('flInput');
-    var text = input.value.trim();
-    if(!text) return;
-    input.value = '';
-    addFlMsg('user', text);
-    flHistory.push({role:'user', text:text});
-    var thinking = document.createElement('div');
-    thinking.className = 'fl-msg assistant';
-    thinking.innerHTML = '<span class="spinner"></span>Thinking…';
-    document.getElementById('flMessages').appendChild(thinking);
-    document.getElementById('flMessages').scrollTop = 999999;
-    try{
-      var historyText = flHistory.slice(-6).map(function(h){ return (h.role==='user'?'Trader':'Franky')+': '+h.text; }).join('\n');
-      var prompt = "You are Franky Lamps, the conversational avatar of the AI-B Trading Desk — you are not a separate assistant, you share the exact same data, standards, and judgment as the rest of this app. " +
-        "Personality: you're a football (soccer) obsessive, a die-hard Chelsea fan who idolizes Frank Lampard, and you talk like a laid-back, funny storyteller — tangential, self-deprecating, quick with a colorful analogy or a football comparison, the kind of guy who'll make a joke mid-sentence and somehow land it. Have actual fun with it. But the substance underneath every joke has to be straight and accurate — the humor is garnish, not a replacement for being right. " +
-        "Never invent data you don't have. Never claim a trade or system is guaranteed to profit — no system can promise that, and that's true even when you're joking around. Keep answers short (2-4 sentences) since this is a small overlay chat, not the main Analyze tab. " +
-        "For real chart reading, tell the trader to use the Analyze tab instead of guessing from description alone.\n\n" +
-        buildDeskContext() + "\n\nRecent conversation:\n" + historyText + "\n\nRespond to the trader's latest message.";
-      var reply = await callClaude(prompt, 1000);
-      thinking.remove();
-      addFlMsg('assistant', reply);
-      flHistory.push({role:'assistant', text:reply});
-    }catch(e){
-      thinking.remove();
-      addFlMsg('assistant', "Couldn't reach the model just now — try again in a moment.");
-    }
-  }
-  document.getElementById('flSend').addEventListener('click', sendFrankyMessage);
-  document.getElementById('flInput').addEventListener('keydown', function(e){ if(e.key==='Enter') sendFrankyMessage(); });
-
-  // ================= LIVE MARKET VIEW (real TradingView embed, visualization only) =================
-  // TradingView doesn't allow embedding someone's personal saved chart layout via a public
-  // link (that would need their login inside our page). What we CAN do honestly: pull the
-  // actual symbol out of a pasted link (or accept a raw symbol) and load it on the official
-  // public widget below.
-  function extractSymbolFromInput(raw){
-    raw = (raw || '').trim();
-    if(!raw) return { symbol: 'FX:EURUSD', note: 'Empty input — showing EURUSD by default.' };
-    if(!/tradingview\.com/i.test(raw)){
-      // Not a TradingView URL — treat as a raw symbol (e.g. "OANDA:XAUUSD" or "EURUSD").
-      return { symbol: raw, note: 'Loaded as a symbol directly.' };
-    }
-    try{
-      var urlStr = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
-      var url = new URL(urlStr);
-      var qSymbol = url.searchParams.get('symbol');
-      if(qSymbol) return { symbol: decodeURIComponent(qSymbol), note: 'Symbol extracted from the link\u2019s ?symbol= parameter.' };
-      var symbolsMatch = url.pathname.match(/\/symbols\/([A-Za-z0-9_\-\.]+)\/?/);
-      if(symbolsMatch) return { symbol: symbolsMatch[1].replace(/-/g,':'), note: 'Symbol extracted from the link path.' };
-      return { symbol: 'FX:EURUSD', note: 'That\u2019s a TradingView link, but it points at a saved personal chart layout \u2014 TradingView doesn\u2019t allow embedding those (would need your TradingView login inside this page). Showing EURUSD instead; paste a symbol page link or a plain symbol like OANDA:XAUUSD.' };
-    }catch(e){
-      return { symbol: 'FX:EURUSD', note: 'Couldn\u2019t parse that as a link — showing EURUSD. Try a plain symbol like OANDA:XAUUSD.' };
-    }
-  }
-  var tvScriptLoaded = false;
-  function loadTradingViewScript(cb){
-    if(tvScriptLoaded){ cb(); return; }
-    var s = document.createElement('script');
-    s.src = 'https://s3.tradingview.com/tv.js';
-    s.onload = function(){ tvScriptLoaded = true; cb(); };
-    s.onerror = function(){ document.getElementById('tradingview_chart').innerHTML = '<div class="empty-state">Could not load TradingView — check your internet connection.</div>'; };
-    document.head.appendChild(s);
-  }
-  function renderTradingViewWidget(symbol){
-    document.getElementById('tradingview_chart').innerHTML = '';
-    if(typeof TradingView === 'undefined'){ return; }
-    new TradingView.widget({
-      autosize: true, symbol: symbol || 'FX:EURUSD', interval: '60', timezone: 'Etc/UTC',
-      theme: 'dark', style: '1', locale: 'en', toolbar_bg: '#0B1424',
-      enable_publishing: false, hide_top_toolbar: false, save_image: false,
-      container_id: 'tradingview_chart'
-    });
-  }
-  document.getElementById('tvReloadBtn').addEventListener('click', function(){
-    var parsed = extractSymbolFromInput(document.getElementById('tvSymbolInput').value);
-    document.getElementById('tvParseNote').textContent = parsed.note;
-    document.getElementById('tvSymbolInput').value = parsed.symbol;
-    loadTradingViewScript(function(){ renderTradingViewWidget(parsed.symbol); });
-  });
-  document.getElementById('tvSymbolInput').addEventListener('keydown', function(e){
-    if(e.key === 'Enter') document.getElementById('tvReloadBtn').click();
-  });
-  loadTradingViewScript(function(){ renderTradingViewWidget('FX:EURUSD'); });
-
-  document.getElementById('tvEmbedLoadBtn').addEventListener('click', function(){
-    var raw = document.getElementById('tvEmbedInput').value.trim();
-    var note = document.getElementById('tvEmbedNote');
-    var target = document.getElementById('tradingview_published_embed');
-    if(!raw){ note.textContent = 'Paste an embed code or link first.'; return; }
-    var src = null;
-    var srcMatch = raw.match(/src=["']([^"']+)["']/i);
-    if(srcMatch){ src = srcMatch[1]; }
-    else if(/^https?:\/\//i.test(raw)){ src = raw; }
-    else if(/^www\.|^tradingview\.com/i.test(raw)){ src = 'https://' + raw; }
-    if(!src){ note.textContent = 'Could not find a link in that — paste the full embed code TradingView gave you, or just the link.'; target.innerHTML=''; return; }
-    try{
-      var u = new URL(src);
-      if(!/(^|\.)tradingview\.com$/i.test(u.hostname)){
-        note.textContent = 'That link isn\u2019t a tradingview.com address — only TradingView embeds are allowed here for safety.';
-        target.innerHTML = '';
-        return;
-      }
-      target.innerHTML = '<iframe src="'+src.replace(/"/g,'&quot;')+'" style="width:100%;height:100%;border:none;" allowfullscreen></iframe>';
-      note.textContent = 'Embedded. Note: this shows your chart as of when you published it, not live edits you make afterward on tradingview.com.';
-    }catch(e){
-      note.textContent = 'That didn\u2019t parse as a valid link.';
-      target.innerHTML = '';
-    }
-  });
-
-  // ================= INIT =================
-  function boot(){
-    Store.init().then(function(){
-      applySettingsToInputs();
-      updateCalcPreset();
-      renderDashboard();
-      checkProviderStatus();
-    });
-  }
-  if(getToken()){ boot(); } else { showAuthGate(); }
-})();
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Anton&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+ --bg-void:#050810; --panel:#0B1424; --panel-raised:#0F1D35; --panel-glass:rgba(15,29,53,0.85);
+ --border:#1E3A63; --border-soft:#142544;
+ --text-primary:#F5F7FA; --text-muted:#93A3BF; --text-dim:#56698C;
+ --gold:#D9AE67; --gold-bright:#F0C888; --gold-dim:#5E4A26;
+ --blue:#1F5FBF; --blue-deep:#034694; --blue-dim:#0A2A57;
+ --bull:#42BE96; --bull-dim:#1B4438; --bear:#E06465; --bear-dim:#48211F;
+ --cyan:#1F5FBF; --radius:9px; --radius-sm:6px;
+ --shadow-card:0 1px 2px rgba(0,0,0,0.5), 0 8px 24px -12px rgba(3,70,148,0.35);
+ }
+ *{box-sizing:border-box;}
+ body{margin:0;background:var(--bg-void);color:var(--text-primary);font-family:'Inter',sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;position:relative;}
+ body::before{
+ content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+ background-image:
+ radial-gradient(1.6px 1.6px at 8% 12%, rgba(255,255,255,0.85), transparent),
+ radial-gradient(1.2px 1.2px at 22% 38%, rgba(240,200,136,0.75), transparent),
+ radial-gradient(1.8px 1.8px at 35% 8%, rgba(255,255,255,0.6), transparent),
+ radial-gradient(1.3px 1.3px at 48% 55%, rgba(255,255,255,0.7), transparent),
+ radial-gradient(1.5px 1.5px at 60% 22%, rgba(240,200,136,0.6), transparent),
+ radial-gradient(1.2px 1.2px at 74% 65%, rgba(255,255,255,0.75), transparent),
+ radial-gradient(1.7px 1.7px at 85% 15%, rgba(255,255,255,0.55), transparent),
+ radial-gradient(1.3px 1.3px at 92% 48%, rgba(240,200,136,0.7), transparent),
+ radial-gradient(1.4px 1.4px at 15% 78%, rgba(255,255,255,0.6), transparent),
+ radial-gradient(1.6px 1.6px at 68% 88%, rgba(255,255,255,0.7), transparent),
+ radial-gradient(1.2px 1.2px at 40% 92%, rgba(240,200,136,0.55), transparent),
+ radial-gradient(1.5px 1.5px at 5% 55%, rgba(255,255,255,0.5), transparent);
+ background-repeat:repeat;background-size:480px 480px;
+ animation:twinkle 7s ease-in-out infinite alternate;
+ }
+ @keyframes twinkle{from{opacity:0.4;}to{opacity:0.85;}}
+ @media (prefers-reduced-motion: reduce){ body::before{animation:none;opacity:0.6;} }
+ .app{display:flex;min-height:100vh;position:relative;z-index:1;}
+ ::selection{background:var(--gold-dim);color:var(--text-primary);}
+ svg.icon{width:16px;height:16px;flex-shrink:0;}
+ .sidebar{width:206px;flex-shrink:0;background:linear-gradient(180deg,var(--panel),#040910);border-right:1px solid var(--border);padding:22px 0;display:flex;flex-direction:column;position:fixed;height:100vh;overflow-y:auto;z-index:40;}
+ .brand{padding:0 22px 20px;border-bottom:1px solid var(--border);margin-bottom:14px;}
+ .brand-title{font-family:'Anton',sans-serif;font-weight:400;font-size:19px;letter-spacing:0.03em;text-transform:uppercase;background:linear-gradient(135deg,var(--gold-bright),var(--gold) 55%,var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent;}
+ .brand-sub{font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--text-dim);letter-spacing:0.12em;margin-top:3px;}
+ .nav{display:flex;flex-direction:column;gap:2px;padding:0 11px;}
+ .nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--radius-sm);cursor:pointer;color:var(--text-muted);font-family:'Oswald',sans-serif;font-size:13px;font-weight:500;letter-spacing:0.01em;border-left:2px solid transparent;transition:background .12s,color .12s;}
+ .nav-item:hover{background:var(--panel-raised);color:var(--text-primary);}
+ .nav-item.active{background:var(--panel-raised);color:var(--gold-bright);border-left:2px solid var(--blue);}
+ .sidebar-foot{margin-top:auto;padding:16px 22px 0;border-top:1px solid var(--border);}
+ .sidebar-foot p{font-size:10px;color:var(--text-dim);line-height:1.6;margin:12px 0 0;font-style:italic;}
+ .mobile-nav{display:none;}
+ .main{flex:1;min-width:0;padding:28px 36px 70px;max-width:1200px;margin-left:206px;}
+ .page{display:none;} .page.active{display:block;animation:fadein .15s ease;}
+ @keyframes fadein{from{opacity:0;}to{opacity:1;}}
+ .page-head{margin-bottom:22px;}
+ .page-title{font-family:'Anton',sans-serif;font-weight:400;font-size:27px;margin:0 0 4px;letter-spacing:0.01em;text-transform:uppercase;color:var(--text-primary);}
+ .page-desc{color:var(--text-muted);font-size:13px;margin:0;line-height:1.5;max-width:640px;}
+ .card{background:var(--panel);border:1px solid var(--border);border-top:1px solid var(--gold-dim);border-radius:var(--radius);padding:19px 21px;box-shadow:var(--shadow-card);}
+ .card + .card{margin-top:14px;}
+ .card-title{font-family:'Oswald',sans-serif;font-size:12.5px;font-weight:600;margin:0 0 13px;letter-spacing:0.06em;text-transform:uppercase;color:var(--gold-bright);display:flex;justify-content:space-between;align-items:center;}
+ .grid{display:grid;gap:14px;}
+ .grid-3{grid-template-columns:repeat(3,1fr);} .grid-2{grid-template-columns:repeat(2,1fr);}
+ @media (max-width:820px){.grid-3,.grid-2{grid-template-columns:1fr;}}
+ .stat-box{background:var(--panel-raised);border:1px solid var(--border-soft);border-radius:var(--radius-sm);padding:14px 16px;}
+ .stat-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;}
+ .stat-value{font-family:'IBM Plex Mono',monospace;font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;}
+ .stat-value.bull{color:var(--bull);} .stat-value.bear{color:var(--bear);} .stat-value.gold{color:var(--gold-bright);}
+ .stat-value.small{font-size:15px;}
+ label{display:block;font-size:11px;color:var(--text-muted);margin-bottom:5px;font-weight:500;}
+ input,select,textarea{width:100%;background:var(--bg-void);border:1px solid var(--border);color:var(--text-primary);border-radius:var(--radius-sm);padding:9px 10px;font-family:'IBM Plex Mono',monospace;font-size:13px;}
+ textarea{font-family:'Inter',sans-serif;resize:vertical;min-height:56px;}
+ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(31,95,191,0.18);}
+ .field{margin-bottom:12px;}
+ .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+ .field-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+ @media (max-width:600px){.field-row,.field-row3{grid-template-columns:1fr;}}
+ button{font-family:'Oswald',sans-serif;font-weight:500;letter-spacing:0.02em;font-size:13px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--panel-raised);color:var(--text-primary);padding:10px 16px;cursor:pointer;transition:filter .12s,transform .06s;}
+ button:hover{filter:brightness(1.18);} button:active{transform:scale(0.98);}
+ button.primary{background:linear-gradient(135deg,var(--gold-bright),var(--gold));border-color:var(--gold);color:#1A1305;font-weight:700;}
+ button.ghost{background:transparent;} button:disabled{opacity:0.45;cursor:not-allowed;}
+ button.small{padding:6px 11px;font-size:12px;} button.danger{color:var(--bear);}
+ .fl-toggle{position:fixed;bottom:22px;right:22px;width:64px;height:64px;border-radius:50%;background:radial-gradient(circle at 35% 30%, #1a2233, #0c0e12);border:1.5px solid #2C5FBF;box-shadow:0 6px 20px rgba(31,95,191,0.4);cursor:pointer;z-index:80;display:flex;align-items:center;justify-content:center;}
+ .fl-toggle:hover{filter:brightness(1.08);}
+ .fl-panel{position:fixed;bottom:96px;right:22px;width:340px;max-height:min(500px,70vh);background:var(--panel-glass);backdrop-filter:blur(14px);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 50px -12px rgba(0,0,0,0.6);z-index:79;display:none;flex-direction:column;overflow:hidden;}
+ .fl-panel.open{display:flex;}
+ .fl-messages{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px;}
+ .fl-msg{font-size:12.5px;line-height:1.5;padding:8px 11px;border-radius:10px;max-width:88%;}
+ .fl-msg.user{background:var(--panel-raised);align-self:flex-end;border:1px solid var(--border);}
+ .fl-msg.assistant{background:rgba(217,174,103,0.08);align-self:flex-start;border:1px solid var(--gold-dim);}
+ @media (max-width:820px){
+ .sidebar{display:none;}
+ .main{margin-left:0;padding:16px 16px 90px;}
+ .mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--panel);border-top:1px solid var(--border);z-index:60;overflow-x:auto;}
+ .mobile-nav-item{flex:1;text-align:center;padding:9px 4px;font-family:'Oswald',sans-serif;font-size:9.5px;letter-spacing:0.02em;color:var(--text-muted);cursor:pointer;white-space:nowrap;}
+ .mobile-nav-item.active{color:var(--gold-bright);}
+ .fl-toggle{bottom:66px;}
+ .fl-panel{bottom:128px;}
+ }
+</style>
+<div class="app">
+ <div class="sidebar">
+ <div class="brand">
+ <div class="brand-title">AI-B TRADING DESK</div>
+ <div class="brand-sub">PERSONAL · PHASE 3</div>
+ </div>
+ <div class="nav" id="navDesktop"></div>
+ <div class="sidebar-foot">
+ <p>Decision support only. No live broker feed or auto-execution. No outcome is guaranteed — this tool sharpens judgment, it doesn't replace it.</p>
+ </div>
+ </div>
+ <div class="main">
+ <div class="page active" id="page-dashboard">
+ <div class="page-head"><h1 class="page-title">Dashboard</h1><p class="page-desc">Your desk at a glance.</p></div>
+ <div class="card"><div class="card-title">Welcome</div><p>Trading desk loaded successfully. Interface ready for chart analysis and risk management.</p></div>
+ </div>
+ </div>
+</div>
+<div class="mobile-nav" id="navMobile"></div>
+<button class="fl-toggle" id="flToggle" title="Franky Lamps">
+ <svg viewBox="0 0 48 48" width="58" height="58" fill="none">
+ <path d="M16 1 L3 9.5 L9 23 L15.5 18.5 L15.5 47 L32.5 47 L32.5 18.5 L39 23 L45 9.5 L32 1 C32 1 28.5 7 24 7 C19.5 7 16 1 16 1 Z" fill="#1F5FBF" stroke="#0F2E5E" stroke-width="1.4" stroke-linejoin="round"/>
+ <text x="24" y="35" font-family="Anton, sans-serif" font-size="23" font-weight="400" fill="#fff" text-anchor="middle">8</text>
+ </svg>
+</button>
+<div class="fl-panel" id="flPanel">
+ <div><div style="font-size:14px;color:var(--gold-bright);">Franky Lamps</div><p style="font-size:11px;color:var(--text-dim);">Conversational trading assistant</p></div>
+ <div class="fl-messages" id="flMessages"><div class="fl-msg assistant">Welcome to the AI-B Trading Desk.</div></div>
+ <div style="display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border);"><input type="text" id="flInput" placeholder="Ask Franky..." style="margin:0;"><button class="primary small" id="flSend">Send</button></div>
+</div>
