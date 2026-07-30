@@ -1,0 +1,37 @@
+# Copy this file to .env and fill in your real values. Never commit .env.
+
+# Your Anthropic API key — get one at https://console.anthropic.com
+# Without this, the Anthropic provider fails. Anthropic is the default provider.
+ANTHROPIC_API_KEY=
+
+# Optional. Your OpenAI API key — get one at https://platform.openai.com/api-keys
+# Only needed if you switch the AI provider to OpenAI in the app's Settings.
+# Leave blank if you're only using Anthropic — nothing breaks.
+OPENAI_API_KEY=
+
+# Optional. One key that gives access to many more model families (Google, Meta,
+# Mistral, DeepSeek, and others) through a single OpenAI-compatible API — get one at
+# https://openrouter.ai/keys
+OPENROUTER_API_KEY=
+# Which model OpenRouter should use (see https://openrouter.ai/models for the full list)
+OPENROUTER_MODEL=google/gemini-2.0-flash-001
+
+# A password-like token YOU make up. Required to use the app once it's on the internet —
+# without it, anyone who finds your URL can spend your Anthropic API credits and see your data.
+# Use a long random string, e.g. generate one with: openssl rand -hex 24
+APP_ACCESS_TOKEN=
+
+# Port the server listens on (optional, defaults to 3000)
+PORT=3000
+
+# ---------------------------------------------------------------------------
+# Optional: Supabase persistence (replaces the default JSON-file storage)
+# Leave both blank to keep using ./data/*.json — nothing else changes if you do.
+# ---------------------------------------------------------------------------
+# 1. Create a free project at https://supabase.com
+# 2. In the Supabase dashboard: SQL Editor -> New query -> paste supabase_schema.sql -> Run
+# 3. Project Settings -> API -> copy "Project URL" and the "service_role" key (NOT "anon")
+#    The service_role key bypasses Row Level Security by design — that's correct here,
+#    since only your own server calls it, never a browser. Never expose this key client-side.
+SUPABASE_URL=
+SUPABASE_SERVICE_KEY=
