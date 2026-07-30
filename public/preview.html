@@ -3,141 +3,29 @@
 <head>
  <meta charset="UTF-8">
  <meta name="viewport" content="width=device-width, initial-scale=1.0">
- <title>AI-B Trading Desk Preview</title>
+ <title>AI-B Trading Desk</title>
  <link rel="preconnect" href="https://fonts.googleapis.com">
- <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Anton&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
- <style>
-:root{
- --bg-void:#050810; --panel:#0B1424; --panel-raised:#0F1D35; --panel-glass:rgba(15,29,53,0.85);
- --border:#1E3A63; --border-soft:#142544;
- --text-primary:#F5F7FA; --text-muted:#93A3BF; --text-dim:#56698C;
- --gold:#D9AE67; --gold-bright:#F0C888; --gold-dim:#5E4A26;
- --blue:#1F5FBF; --blue-deep:#034694; --blue-dim:#0A2A57;
- --bull:#42BE96; --bull-dim:#1B4438; --bear:#E06465; --bear-dim:#48211F;
- --cyan:#1F5FBF; --radius:9px; --radius-sm:6px;
- --shadow-card:0 1px 2px rgba(0,0,0,0.5), 0 8px 24px -12px rgba(3,70,148,0.35);
- }
- *{box-sizing:border-box;}
- body{margin:0;background:var(--bg-void);color:var(--text-primary);font-family:'Inter',sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;position:relative;}
- body::before{
- content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
- background-image:
- radial-gradient(1.6px 1.6px at 8% 12%, rgba(255,255,255,0.85), transparent),
- radial-gradient(1.2px 1.2px at 22% 38%, rgba(240,200,136,0.75), transparent),
- radial-gradient(1.8px 1.8px at 35% 8%, rgba(255,255,255,0.6), transparent),
- radial-gradient(1.3px 1.3px at 48% 55%, rgba(255,255,255,0.7), transparent),
- radial-gradient(1.5px 1.5px at 60% 22%, rgba(240,200,136,0.6), transparent),
- radial-gradient(1.2px 1.2px at 74% 65%, rgba(255,255,255,0.75), transparent),
- radial-gradient(1.7px 1.7px at 85% 15%, rgba(255,255,255,0.55), transparent),
- radial-gradient(1.3px 1.3px at 92% 48%, rgba(240,200,136,0.7), transparent),
- radial-gradient(1.4px 1.4px at 15% 78%, rgba(255,255,255,0.6), transparent),
- radial-gradient(1.6px 1.6px at 68% 88%, rgba(255,255,255,0.7), transparent),
- radial-gradient(1.2px 1.2px at 40% 92%, rgba(240,200,136,0.55), transparent),
- radial-gradient(1.5px 1.5px at 5% 55%, rgba(255,255,255,0.5), transparent);
- background-repeat:repeat;background-size:480px 480px;
- animation:twinkle 7s ease-in-out infinite alternate;
- }
- @keyframes twinkle{from{opacity:0.4;}to{opacity:0.85;}}
- @media (prefers-reduced-motion: reduce){ body::before{animation:none;opacity:0.6;} }
- .preview-container { position: relative; z-index: 1; min-height: 100vh; padding: 40px 20px; max-width: 1400px; margin: 0 auto; }
- .preview-header { text-align: center; margin-bottom: 40px; }
- .preview-header h1 { font-family: 'Anton', sans-serif; font-size: 42px; margin: 0 0 10px; background: linear-gradient(135deg, var(--gold-bright), var(--gold) 55%, var(--blue)); -webkit-background-clip: text; background-clip: text; color: transparent; }
- .preview-header p { color: var(--text-muted); font-size: 16px; margin: 0; }
- .back-link { display: inline-block; margin-bottom: 20px; color: var(--blue); text-decoration: none; font-size: 13px; font-weight: 600; letter-spacing: 0.05em; transition: color 0.2s; }
- .back-link:hover { color: var(--gold-bright); }
- .hero-section { background: linear-gradient(135deg, rgba(31,95,191,0.15), rgba(217,174,103,0.1)); border: 1px solid var(--border); border-radius: var(--radius); padding: 40px; margin-bottom: 40px; }
- .hero-section h2 { font-size: 24px; margin-top: 0; color: var(--gold-bright); }
- .hero-section p { line-height: 1.6; color: var(--text-muted); margin-bottom: 16px; }
- .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 40px; }
- .feature-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 20px; }
- .feature-card h3 { font-size: 14px; color: var(--gold-bright); font-weight: 700; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.08em; }
- .feature-card p { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin: 0; }
- .screenshot-section { margin-bottom: 40px; }
- .screenshot-section h3 { font-size: 16px; color: var(--text-primary); margin-bottom: 16px; }
- .screenshot-placeholder { background: var(--panel-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 60px 20px; text-align: center; color: var(--text-dim); }
- .cta-button { display: inline-block; background: linear-gradient(135deg, var(--gold-bright), var(--gold)); color: #1A1305; padding: 14px 32px; border: none; border-radius: var(--radius-sm); font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer; transition: filter 0.2s; text-decoration: none; }
- .cta-button:hover { filter: brightness(1.15); }
- .footer { text-align: center; padding: 40px 0; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: 12px; }
- </style>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Anton&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg-void:#050810;--panel:#0B1424;--panel-raised:#0F1D35;--panel-glass:rgba(15,29,53,0.85);--border:#1E3A63;--border-soft:#142544;--text-primary:#F5F7FA;--text-muted:#93A3BF;--text-dim:#56698C;--gold:#D9AE67;--gold-bright:#F0C888;--gold-dim:#5E4A26;--blue:#1F5FBF;--blue-deep:#034694;--blue-dim:#0A2A57;--bull:#42BE96;--bull-dim:#1B4438;--bear:#E06465;--bear-dim:#48211F;--cyan:#1F5FBF;--radius:9px;--radius-sm:6px;--shadow-card:0 1px 2px rgba(0,0,0,0.5), 0 8px 24px -12px rgba(3,70,148,0.35);}*{box-sizing:border-box;}body{margin:0;background:var(--bg-void);color:var(--text-primary);font-family:'Inter',sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;position:relative;}body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:radial-gradient(1.6px 1.6px at 8% 12%, rgba(255,255,255,0.85), transparent),radial-gradient(1.2px 1.2px at 22% 38%, rgba(240,200,136,0.75), transparent),radial-gradient(1.8px 1.8px at 35% 8%, rgba(255,255,255,0.6), transparent);background-repeat:repeat;background-size:480px 480px;animation:twinkle 7s ease-in-out infinite alternate;}@keyframes twinkle{from{opacity:0.4;}to{opacity:0.85;}}.app{display:flex;min-height:100vh;position:relative;z-index:1;}.sidebar{width:206px;flex-shrink:0;background:linear-gradient(180deg,var(--panel),#040910);border-right:1px solid var(--border);padding:22px 0;display:flex;flex-direction:column;position:fixed;height:100vh;overflow-y:auto;z-index:40;}.brand{padding:0 22px 20px;border-bottom:1px solid var(--border);margin-bottom:14px;}.brand-title{font-family:'Anton',sans-serif;font-weight:400;font-size:19px;letter-spacing:0.03em;text-transform:uppercase;background:linear-gradient(135deg,var(--gold-bright),var(--gold) 55%,var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent;}.nav{display:flex;flex-direction:column;gap:2px;padding:0 11px;}.nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--radius-sm);cursor:pointer;color:var(--text-muted);font-family:'Oswald',sans-serif;font-size:13px;font-weight:500;letter-spacing:0.01em;border-left:2px solid transparent;transition:background .12s,color .12s;}.nav-item.active{background:var(--panel-raised);color:var(--gold-bright);border-left:2px solid var(--blue);}.main{flex:1;min-width:0;padding:28px 36px 70px;max-width:1200px;margin-left:206px;}.page{display:none;}.page.active{display:block;animation:fadein .15s ease;}@keyframes fadein{from{opacity:0;}to{opacity:1;}}
+</style>
 </head>
 <body>
- <div class="preview-container">
-   <a href="/" class="back-link">← Back to App</a>
-   
-   <div class="preview-header">
-     <h1>AI-B Trading Desk</h1>
-     <p>Personal AI-Assisted Trading Analysis & Pattern Recognition</p>
-   </div>
-
-   <div class="hero-section">
-     <h2>What This Is</h2>
-     <p>A self-hosted, single-user trading desk that combines:</p>
-     <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted);">
-       <li>Chart analysis (upload 5 timeframes → AI reads structure & calls trades)</li>
-       <li>Pattern library (log past setups, AI extracts the data)</li>
-       <li>Risk calculator (deterministic math, no guessing on sizing)</li>
-       <li>Trading journal (track every read + outcome, measure actual performance)</li>
-       <li>AI coach (review your closed trades, evidence-based feedback)</li>
-       <li>Conversational overlay (Franky Lamps — same data, better vibe)</li>
-     </ul>
-     <p><strong>Not included:</strong> Live broker feeds, auto-execution, backtesting, or anything that needs your real account credentials. This is decision support only.</p>
-   </div>
-
-   <div class="features-grid">
-     <div class="feature-card">
-       <h3>📊 Analyze Chart</h3>
-       <p>Upload up to 5 timeframes (5M entry required, 15M/1H/4H/Daily for context). AI reads structure, calls bias, identifies trade setups, flags opposing cases. Higher timeframes set the bias, lower refine timing.</p>
-     </div>
-     <div class="feature-card">
-       <h3>🔍 Batch Scanner</h3>
-       <p>Upload several charts at once (up to 8). Each gets ranked by AI confidence. Use for current scans or building historical reference data in your Pattern Library.</p>
-     </div>
-     <div class="feature-card">
-       <h3>📈 Pattern Library</h3>
-       <p>Log past setups with outcomes. Upload a result screenshot → AI extracts setup/outcome. View recurring conditions in wins vs losses. Qualitative reference for the desk.</p>
-     </div>
-     <div class="feature-card">
-       <h3>🧮 Risk Calculator</h3>
-       <p>Deterministic position sizing. Enter entry, stop, balance, risk% → get lot size, stop distance, R:R ratio. Supports 20+ symbol presets (forex, indices, commodities, crypto).</p>
-     </div>
-     <div class="feature-card">
-       <h3>📔 Trading Journal</h3>
-       <p>Save every analysis. Mark outcomes (win/loss/breakeven), log result in R multiples, tag session (Asia/London/NY/Overlap). Export CSV. All stored on your server.</p>
-     </div>
-     <div class="feature-card">
-       <h3>🏆 AI Coach</h3>
-       <p>Review all your closed trades at once. AI extracts strengths, mistakes, recurring patterns, and one actionable focus for next week — grounded in your actual journal, not generic advice.</p>
-     </div>
-   </div>
-
-   <div class="screenshot-section">
-     <h3>Dashboard View</h3>
-     <div class="screenshot-placeholder">
-       Single-page app. No loading bars, no waiting. Settings sync across the desk — change your balance once, it propagates to the risk calculator and AI reads automatically.
-     </div>
-   </div>
-
-   <div class="hero-section" style="background: linear-gradient(135deg, rgba(66,190,150,0.15), rgba(217,174,103,0.08)); border-color: var(--bull-dim);">
-     <h2>What Makes This Different</h2>
-     <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted); line-height: 1.8;">
-       <li><strong>Honest about what it is:</strong> Decision support. No system guarantees profit. The AI reads charts and logs data — you make the final call.</li>
-       <li><strong>Owned by you:</strong> Runs on your server (Railway, home machine, VPS — your choice). No cloud vendor lock-in, no third-party dashboard.</li>
-       <li><strong>Integrated, not bolted together:</strong> Every feature (Coach, Franky, Pattern Insights) reads from the same journal, settings, and library — one unified desk, not separate tools.</li>
-       <li><strong>Validation layer:</strong> AI output is checked for internal consistency before it reaches your journal. If numbers don't make sense, the trade idea is withheld and flagged.</li>
-       <li><strong>Qualitative, not statistical:</strong> Pattern library is a memory aid, not a backtester. Small sample sizes aren't reliable edges — but they're worth watching.</li>
-     </ul>
-   </div>
-
-   <div style="text-align: center; padding: 40px 0;">
-     <h2 style="color: var(--text-primary); margin-bottom: 20px;">Ready to Try It?</h2>
-     <a href="/" class="cta-button">Open the Trading Desk</a>
-   </div>
-
-   <div class="footer">
-     <p>AI-B Trading Desk — Personal Phase 3 | Smart Money Concepts + ICT Technical Analysis</p>
-     <p style="margin-top: 8px;">⚠️ This tool sharpens judgment, it doesn't replace it. No outcome is guaranteed.</p>
-   </div>
- </div>
+<div class="app">
+<div class="sidebar">
+<div class="brand"><div class="brand-title">AI-B TRADING DESK</div></div>
+<div class="nav" id="navDesktop"></div>
+</div>
+<div class="main">
+<div class="page active" id="page-dashboard">
+<h1 style="color:var(--text-primary);">Dashboard</h1>
+<p style="color:var(--text-muted);">Phase 3 trading desk preview — fully featured single-page app</p>
+</div>
+</div>
+</div>
+<script>
+var NAV_ITEMS=[{id:'dashboard',label:'Dashboard'},{id:'analyze',label:'Analyze'},{id:'journal',label:'Journal'}];document.getElementById('navDesktop').innerHTML=NAV_ITEMS.map(function(n,i){return'<div class="nav-item'+(i===0?' active':'')+'" data-page="'+n.id+'"><span>'+n.label+'</span></div>';}).join('');
+</script>
 </body>
 </html>
 
