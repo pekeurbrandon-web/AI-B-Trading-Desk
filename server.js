@@ -12,6 +12,19 @@ const ACCESS_TOKEN = process.env.APP_ACCESS_TOKEN || '';
 app.use(express.json({ limit: '15mb' })); // chart screenshots as base64 need real headroom
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Serve index.html for root path if public/index.html doesn't exist
+app.get('/', (req, res) => {
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  const rootIndexPath = path.join(__dirname, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else if (fs.existsSync(rootIndexPath)) {
+    res.sendFile(rootIndexPath);
+  } else {
+    res.status(404).send('index.html not found');
+  }
+});
+
 // ---------------- API keys stay in their own small local file ----------------
 // Deliberately NOT migrated to Supabase along with settings/journal/patterns: these are
 // server secrets, not application data, and keeping them local avoids ever putting a raw
@@ -317,3 +330,4 @@ app.get('/api/logs', (req, res) => {
 app.listen(PORT, () => {
   console.log('\nAI-B Trading Desk running at http://localhost:' + PORT + '\n');
 });
+
