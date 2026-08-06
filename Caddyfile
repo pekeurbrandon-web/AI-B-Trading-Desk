@@ -1,5 +1,0 @@
-{$DOMAIN}
-{
-  reverse_proxy ai-b-desk:3000
-  tls {$CADDY_EMAIL}
-}
