@@ -1,0 +1,44 @@
+version: "3.8"
+
+services:
+  ai-b-desk:
+    build: .
+    image: ai-b-trading-desk:latest
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data      # persistent storage for settings, keys, journal, logs
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2
+    profiles:
+      - tls
+    depends_on:
+      - ai-b-desk
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy_data:/data
+      - ./caddy_config:/config
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Notes:
+# - The 'caddy' service is optional and runs only when you enable the 'tls' profile:
+#     docker compose --profile tls up -d --build
+# - Without the tls profile you can run just the app:
+#     docker compose up -d --build
